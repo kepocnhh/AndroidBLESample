@@ -36,24 +36,59 @@ internal class BLEScannerService : Service() {
         BT_NO_PERMISSION,
         BT_ADAPTER_DISABLED,
         BT_NO_SCANNER,
+        BT_NO_SCAN_PERMISSION,
     }
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Main + job)
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            TODO()
+            println("$TAG: on scan result: callback $callbackType result $result")
+            // todo
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>?) {
-            TODO()
+            println("$TAG: on batch scan results: $results")
+            // todo
         }
 
         override fun onScanFailed(errorCode: Int) {
-            TODO()
+            println("$TAG: error: $errorCode")
+            // todo
         }
     }
 
+    private fun getBluetoothAdapter(): BluetoothAdapter {
+        val manager = getSystemService(BluetoothManager::class.java)
+        val adapter: BluetoothAdapter? = manager.adapter
+        if (adapter == null) {
+            throw BLEScannerException(Error.BT_NO_ADAPTER)
+        }
+        val isEnabled = try {
+            adapter.isEnabled
+        } catch (e: SecurityException) {
+            throw BLEScannerException(Error.BT_NO_PERMISSION)
+        }
+        if (!isEnabled) {
+            throw BLEScannerException(Error.BT_ADAPTER_DISABLED)
+        }
+        return adapter
+    }
+
+    private fun BluetoothAdapter.scanStart() {
+        val scanner: BluetoothLeScanner? = bluetoothLeScanner
+        if (scanner == null) {
+            throw BLEScannerException(Error.BT_NO_SCANNER)
+        }
+        println("$TAG: scanner $scanner")
+        try {
+            scanner.startScan(callback)
+        } catch (e: SecurityException) {
+            throw BLEScannerException(Error.BT_NO_SCAN_PERMISSION)
+        }
+    }
+
+    @Deprecated(message = "replace with scanStart")
     private fun getScanner(): BluetoothLeScanner {
         val manager = getSystemService(BluetoothManager::class.java)
         val adapter: BluetoothAdapter? = manager.adapter
@@ -78,18 +113,17 @@ internal class BLEScannerService : Service() {
     }
 
     private fun onScanStart() {
-        _scanState.value = ScanState.NONE
-        runCatching(::getScanner).fold(
-            onSuccess = {
-                scope.launch {
-                    _scanState.value = ScanState.STARTED
-                    withContext(Dispatchers.Default) {
-                        it.startScan(callback)
-                    }
+        scope.launch {
+            runCatching {
+                val adapter = getBluetoothAdapter()
+                withContext(Dispatchers.Default) {
+                    adapter.scanStart()
                 }
-            },
-            onFailure = {
-                scope.launch {
+            }.fold(
+                onSuccess = {
+                    _scanState.value = ScanState.STARTED
+                },
+                onFailure = {
                     val error = when (it) {
                         is BLEScannerException -> it.error
                         else -> {
@@ -98,10 +132,10 @@ internal class BLEScannerService : Service() {
                         }
                     }
                     _broadcast.emit(Broadcast.OnError(error))
-                }
-                _scanState.value = ScanState.STOPPED
-            },
-        )
+                    _scanState.value = ScanState.STOPPED
+                },
+            )
+        }
     }
 
     private fun onScanStop() {
