@@ -14,7 +14,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 internal class BLEScannerException(val error: BLEScannerService.Error) : Exception()
 
@@ -79,7 +81,12 @@ internal class BLEScannerService : Service() {
         _scanState.value = ScanState.NONE
         runCatching(::getScanner).fold(
             onSuccess = {
-                it.startScan(callback)
+                scope.launch {
+                    _scanState.value = ScanState.STARTED
+                    withContext(Dispatchers.Default) {
+                        it.startScan(callback)
+                    }
+                }
             },
             onFailure = {
                 scope.launch {
@@ -110,8 +117,8 @@ internal class BLEScannerService : Service() {
                         else -> null
                     }
                     _broadcast.emit(Broadcast.OnError(error))
+                    _scanState.value = ScanState.STOPPED
                 }
-                _scanState.value = ScanState.STOPPED
             },
         )
     }
@@ -140,6 +147,6 @@ internal class BLEScannerService : Service() {
         private val _broadcast = MutableSharedFlow<Broadcast>()
         val broadcast = _broadcast.asSharedFlow()
         private val _scanState = MutableStateFlow(ScanState.STOPPED)
-        val scanState = _scanState.asSharedFlow()
+        val scanState = _scanState.asStateFlow()
     }
 }
