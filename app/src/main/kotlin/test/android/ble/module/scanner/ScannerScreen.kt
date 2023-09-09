@@ -3,7 +3,6 @@ package test.android.ble.module.scanner
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,8 +13,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -24,27 +23,36 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import test.android.ble.BluetoothService
+import test.android.ble.module.bluetooth.BLEScannerService
+import test.android.ble.util.android.showToast
 import test.android.ble.util.compose.toPaddings
 
 @Composable
 internal fun ScannerScreen() {
     val context = LocalContext.current
+    val insets = LocalView.current.rootWindowInsets.toPaddings()
+    val scanState by BLEScannerService.scanState.collectAsState(BLEScannerService.ScanState.NONE)
     LaunchedEffect(Unit) {
-        BluetoothService.broadcast.collect { broadcast ->
+        BLEScannerService.broadcast.collect { broadcast ->
             when (broadcast) {
-                else -> TODO()
+                is BLEScannerService.Broadcast.OnError -> {
+                    when (broadcast.error) {
+                        BLEScannerService.Error.BT_NO_ADAPTER -> context.showToast("No adapter!")
+                        BLEScannerService.Error.BT_NO_PERMISSION -> context.showToast("No permission!")
+                        BLEScannerService.Error.BT_ADAPTER_DISABLED -> context.showToast("Adapter disabled!")
+                        BLEScannerService.Error.BT_NO_SCANNER -> context.showToast("No scanner!")
+                        null -> context.showToast("Unknown error!")
+                    }
+                }
             }
         }
     }
-    val insets = LocalView.current.rootWindowInsets.toPaddings()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
             .padding(insets),
     ) {
-        val scanState = remember { mutableStateOf(false) }
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
@@ -52,22 +60,30 @@ internal fun ScannerScreen() {
         ) {
             // todo
         }
+        val text = when (scanState) {
+            BLEScannerService.ScanState.NONE -> "..."
+            BLEScannerService.ScanState.STARTED -> "stop"
+            BLEScannerService.ScanState.STOPPED -> "start"
+        }
         BasicText(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(64.dp)
-                .clickable {
-                    val intent = Intent(context, BluetoothService::class.java)
-                    if (scanState.value) {
-                        intent.action = BluetoothService.ACTION_SCAN_STOP
-                    } else {
-                        intent.action = BluetoothService.ACTION_SCAN_START
+                .clickable(enabled = scanState != BLEScannerService.ScanState.NONE) {
+                    val intent = Intent(context, BLEScannerService::class.java)
+                    when (scanState) {
+                        BLEScannerService.ScanState.NONE -> TODO()
+                        BLEScannerService.ScanState.STARTED -> {
+                            intent.action = BLEScannerService.ACTION_SCAN_STOP
+                        }
+                        BLEScannerService.ScanState.STOPPED -> {
+                            intent.action = BLEScannerService.ACTION_SCAN_START
+                        }
                     }
-                    scanState.value = !scanState.value
                     context.startService(intent)
                 }
                 .wrapContentSize(),
-            text = if (scanState.value) "stop" else "start",
+            text = text,
             style = TextStyle(
                 textAlign = TextAlign.Center,
                 color = Color.Black,

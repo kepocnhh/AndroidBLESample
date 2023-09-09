@@ -10,7 +10,7 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <service android:name=".BluetoothService"
+        <service android:name=".module.bluetooth.BLEScannerService"
             android:exported="false"/>
     </application>
 </manifest>
