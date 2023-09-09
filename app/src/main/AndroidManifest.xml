@@ -18,6 +18,7 @@
             </intent-filter>
         </activity>
         <service android:name=".module.bluetooth.BLEScannerService"
-            android:exported="false"/>
+            android:exported="false"
+            android:foregroundServiceType="location|connectedDevice"/>
     </application>
 </manifest>

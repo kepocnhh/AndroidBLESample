@@ -3,6 +3,7 @@ package test.android.ble.module.bluetooth
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
@@ -112,10 +113,13 @@ internal class BLEScannerService : Service() {
 
     private fun startForeground() {
         val notificationManager = getSystemService(NotificationManager::class.java)
+        val intent = Intent(this, BLEScannerService::class.java)
+        intent.action = ACTION_SCAN_STOP
+        val pendingIntent = PendingIntent.getService(this, -1, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT)
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("foo")
-            .setContentText("bar")
+            .setContentTitle("scanning...")
             .setSmallIcon(R.drawable.bt)
+            .addAction(-1, "stop", pendingIntent)
             .build()
         notificationManager.notify(NOTIFICATION_ID, notification)
         startForeground(NOTIFICATION_ID, notification)
