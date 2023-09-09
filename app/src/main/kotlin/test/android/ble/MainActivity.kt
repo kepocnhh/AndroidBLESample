@@ -3,6 +3,7 @@ package test.android.ble
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -19,12 +20,16 @@ import test.android.ble.util.android.showToast
 internal class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "[Main]"
-        private val permissions = arrayOf(
+        private val permissions = mutableListOf(
             Manifest.permission.BLUETOOTH,
             Manifest.permission.BLUETOOTH_ADMIN,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACCESS_FINE_LOCATION,
-        )
+        ).also {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                it.add(Manifest.permission.POST_NOTIFICATIONS,)
+            }
+        }.toTypedArray()
     }
 
     private val requestPermissionsLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->

@@ -72,17 +72,17 @@ internal fun ScannerScreen() {
                 .fillMaxWidth()
                 .height(64.dp)
                 .clickable(enabled = scanState != BLEScannerService.ScanState.NONE) {
-                    val intent = Intent(context, BLEScannerService::class.java)
-                    when (scanState) {
-                        BLEScannerService.ScanState.NONE -> TODO()
-                        BLEScannerService.ScanState.STARTED -> {
-                            intent.action = BLEScannerService.ACTION_SCAN_STOP
-                        }
-                        BLEScannerService.ScanState.STOPPED -> {
-                            intent.action = BLEScannerService.ACTION_SCAN_START
+                    BLEScannerService.start(context) { intent ->
+                        when (scanState) {
+                            BLEScannerService.ScanState.NONE -> TODO()
+                            BLEScannerService.ScanState.STARTED -> {
+                                intent.action = BLEScannerService.ACTION_SCAN_STOP
+                            }
+                            BLEScannerService.ScanState.STOPPED -> {
+                                intent.action = BLEScannerService.ACTION_SCAN_START
+                            }
                         }
                     }
-                    context.startService(intent)
                 }
                 .wrapContentSize(),
             text = text,

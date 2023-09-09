@@ -1,14 +1,20 @@
 package test.android.ble.module.bluetooth
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.content.Context
 import android.content.Intent
 import android.location.LocationManager
+import android.os.Build
 import android.os.IBinder
+import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +24,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import test.android.ble.R
+import kotlin.math.absoluteValue
 
 internal class BLEScannerException(val error: BLEScannerService.Error) : Exception()
 
@@ -102,7 +110,19 @@ internal class BLEScannerService : Service() {
         scanner.stopScan(callback)
     }
 
+    private fun startForeground() {
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("foo")
+            .setContentText("bar")
+            .setSmallIcon(R.drawable.bt)
+            .build()
+        notificationManager.notify(NOTIFICATION_ID, notification)
+        startForeground(NOTIFICATION_ID, notification)
+    }
+
     private fun onScanStart() {
+        startForeground()
         scope.launch {
             _scanState.value = ScanState.NONE
             runCatching {
@@ -153,6 +173,24 @@ internal class BLEScannerService : Service() {
                     _scanState.value = ScanState.STOPPED
                 },
             )
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel: NotificationChannel? = notificationManager.getNotificationChannel(CHANNEL_ID)
+            if (channel == null) {
+                notificationManager.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_ID,
+                        CHANNEL_NAME,
+                        NotificationManager.IMPORTANCE_HIGH,
+                    ),
+                )
+            }
         }
     }
 
@@ -177,9 +215,23 @@ internal class BLEScannerService : Service() {
         val ACTION_SCAN_START = "${this::class.java.name}:ACTION_SCAN_START"
         val ACTION_SCAN_STOP = "${this::class.java.name}:ACTION_SCAN_STOP"
 
+        private val CHANNEL_ID = "${this::class.java.name}:CHANNEL:BLEScanner"
+        private const val CHANNEL_NAME = "BLE Scanner"
+        private val NOTIFICATION_ID = System.currentTimeMillis().toInt().absoluteValue
+
         private val _broadcast = MutableSharedFlow<Broadcast>()
         val broadcast = _broadcast.asSharedFlow()
         private val _scanState = MutableStateFlow(ScanState.STOPPED)
         val scanState = _scanState.asStateFlow()
+
+        fun start(context: Context, builder: (Intent) -> Unit) {
+            val intent = Intent(context, BLEScannerService::class.java)
+            builder(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
     }
 }

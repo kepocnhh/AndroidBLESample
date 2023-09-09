@@ -74,6 +74,8 @@ androidComponents.onVariants { variant ->
                     "android.permission.BLUETOOTH_ADMIN",
                     "android.permission.ACCESS_COARSE_LOCATION",
                     "android.permission.ACCESS_FINE_LOCATION",
+                    "android.permission.FOREGROUND_SERVICE",
+                    "android.permission.POST_NOTIFICATIONS",
                 )
                 check(actual.sorted() == expected.sorted()) {
                     "Actual is:\n$actual\nbut expected is:\n$expected"
