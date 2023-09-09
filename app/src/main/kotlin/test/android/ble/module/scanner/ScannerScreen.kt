@@ -42,6 +42,7 @@ internal fun ScannerScreen() {
                         BLEScannerService.Error.BT_ADAPTER_DISABLED -> context.showToast("Adapter disabled!")
                         BLEScannerService.Error.BT_NO_SCANNER -> context.showToast("No scanner!")
                         BLEScannerService.Error.BT_NO_SCAN_PERMISSION -> context.showToast("No scan permission!")
+                        BLEScannerService.Error.BT_LOCATION_DISABLED -> context.showToast("Location disabled!")
                         null -> context.showToast("Unknown error!")
                     }
                 }

@@ -7,6 +7,7 @@ import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Intent
+import android.location.LocationManager
 import android.os.IBinder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +38,7 @@ internal class BLEScannerService : Service() {
         BT_ADAPTER_DISABLED,
         BT_NO_SCANNER,
         BT_NO_SCAN_PERMISSION,
+        BT_LOCATION_DISABLED,
     }
 
     private val job = SupervisorJob()
@@ -59,8 +61,8 @@ internal class BLEScannerService : Service() {
     }
 
     private fun getBluetoothAdapter(): BluetoothAdapter {
-        val manager = getSystemService(BluetoothManager::class.java)
-        val adapter: BluetoothAdapter? = manager.adapter
+        val bluetoothManager = getSystemService(BluetoothManager::class.java)
+        val adapter: BluetoothAdapter? = bluetoothManager.adapter
         if (adapter == null) {
             throw BLEScannerException(Error.BT_NO_ADAPTER)
         }
@@ -80,7 +82,11 @@ internal class BLEScannerService : Service() {
         if (scanner == null) {
             throw BLEScannerException(Error.BT_NO_SCANNER)
         }
-        println("$TAG: scanner $scanner")
+        val locationManager = getSystemService(LocationManager::class.java)
+        val isLocationEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        if (!isLocationEnabled) {
+            throw BLEScannerException(Error.BT_LOCATION_DISABLED)
+        }
         try {
             scanner.startScan(callback)
         } catch (e: SecurityException) {
@@ -88,32 +94,17 @@ internal class BLEScannerService : Service() {
         }
     }
 
-    @Deprecated(message = "replace with scanStart")
-    private fun getScanner(): BluetoothLeScanner {
-        val manager = getSystemService(BluetoothManager::class.java)
-        val adapter: BluetoothAdapter? = manager.adapter
-        if (adapter == null) {
-            throw BLEScannerException(Error.BT_NO_ADAPTER)
-        }
-        val isEnabled = try {
-            adapter.isEnabled
-        } catch (e: SecurityException) {
-            throw BLEScannerException(Error.BT_NO_PERMISSION)
-        }
-        if (!isEnabled) {
-            throw BLEScannerException(Error.BT_ADAPTER_DISABLED)
-        }
-        println("$TAG: adapter is enabled")
-        val scanner: BluetoothLeScanner? = adapter.bluetoothLeScanner
+    private fun BluetoothAdapter.scanStop() {
+        val scanner: BluetoothLeScanner? = bluetoothLeScanner
         if (scanner == null) {
             throw BLEScannerException(Error.BT_NO_SCANNER)
         }
-        println("$TAG: scanner $scanner")
-        return scanner
+        scanner.stopScan(callback)
     }
 
     private fun onScanStart() {
         scope.launch {
+            _scanState.value = ScanState.NONE
             runCatching {
                 val adapter = getBluetoothAdapter()
                 withContext(Dispatchers.Default) {
@@ -139,22 +130,30 @@ internal class BLEScannerService : Service() {
     }
 
     private fun onScanStop() {
-        _scanState.value = ScanState.NONE
-        runCatching(::getScanner).fold(
-            onSuccess = {
-                it.stopScan(callback)
-            },
-            onFailure = {
-                scope.launch {
+        scope.launch {
+            _scanState.value = ScanState.NONE
+            runCatching {
+                val adapter = getBluetoothAdapter()
+                withContext(Dispatchers.Default) {
+                    adapter.scanStop()
+                }
+            }.fold(
+                onSuccess = {
+                    _scanState.value = ScanState.STOPPED
+                },
+                onFailure = {
                     val error = when (it) {
                         is BLEScannerException -> it.error
-                        else -> null
+                        else -> {
+                            println("$TAG: $it")
+                            null
+                        }
                     }
                     _broadcast.emit(Broadcast.OnError(error))
                     _scanState.value = ScanState.STOPPED
-                }
-            },
-        )
+                },
+            )
+        }
     }
 
     private fun onStartCommand(intent: Intent) {
