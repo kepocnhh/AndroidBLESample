@@ -1,6 +1,5 @@
 package test.android.ble.module.bluetooth
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -9,6 +8,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanRecord
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.content.Intent
@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import test.android.ble.R
+import test.android.ble.entity.BluetoothDevice
 import kotlin.math.absoluteValue
 
 internal class BLEScannerException(val error: BLEScannerService.Error) : Exception()
@@ -33,6 +34,7 @@ internal class BLEScannerException(val error: BLEScannerService.Error) : Excepti
 internal class BLEScannerService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Error?) : Broadcast
+        class OnBTDevice(val device: BluetoothDevice) : Broadcast
     }
 
     enum class ScanState {
@@ -55,7 +57,18 @@ internal class BLEScannerService : Service() {
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             println("$TAG: on scan result: callback $callbackType result $result")
-            // todo
+            if (result == null) return
+            val scanRecord = result.scanRecord ?: return
+            val device = result.device ?: return
+            val btDevice = BluetoothDevice(
+                address = device.address ?: return,
+                name = device.name ?: return,
+            )
+            scope.launch {
+                _broadcast.emit(
+                    Broadcast.OnBTDevice(btDevice),
+                )
+            }
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>?) {
@@ -67,6 +80,51 @@ internal class BLEScannerService : Service() {
             println("$TAG: error: $errorCode")
             // todo
         }
+    }
+
+    private fun ScanRecord.getData(): Map<Int, String> {
+        val result = mutableMapOf<Int, String>()
+        var index = 0
+        val bytes = bytes
+        while (index < bytes.size) {
+            val length = bytes[index++]
+            if (length.toInt() == 0) break
+            val type = bytes[index]
+            if (type.toInt() == 0) break
+            val data = bytes.copyOfRange(index + 1, index + length)
+            if (data.isEmpty()) break
+            val hex = StringBuilder(data.size * 2)
+            for (i in data.indices.reversed()) {
+                hex.append(String.format("%02X", data[i]))
+            }
+            result[type.toInt()] = hex.toString()
+            index += length
+        }
+        return result
+    }
+
+    private fun ScanRecord.getName(): String? {
+        val type = 0x09
+        var index = 0
+        val bytes = bytes
+        while (index < bytes.size) {
+            val length = bytes[index++]
+            if (length.toInt() == 0) break
+            if (bytes[index].toInt() != type) {
+                index += length
+                break
+            }
+            val data = bytes.copyOfRange(index + 1, index + length)
+            if (data.isEmpty()) break
+            val hex = StringBuilder(data.size * 2)
+            var b = data.lastIndex
+            while (b >= 0) {
+                hex.append(String.format("%02X", data[b]))
+                b--
+            }
+            return hex.toString()
+        }
+        return null
     }
 
     private fun getBluetoothAdapter(): BluetoothAdapter {
