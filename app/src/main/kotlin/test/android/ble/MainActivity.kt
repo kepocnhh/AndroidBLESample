@@ -9,9 +9,7 @@ internal class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            BackHandler {
-                finish()
-            }
+            BackHandler(onBack = ::finish)
             // todo
         }
     }
