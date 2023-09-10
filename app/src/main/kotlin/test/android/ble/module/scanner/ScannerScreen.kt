@@ -1,6 +1,5 @@
 package test.android.ble.module.scanner
 
-import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -36,7 +35,7 @@ import test.android.ble.util.android.showToast
 import test.android.ble.util.compose.toPaddings
 
 @Composable
-internal fun ScannerScreen() {
+internal fun ScannerScreen(onSelect: (BluetoothDevice) -> Unit) {
     val context = LocalContext.current
     val insets = LocalView.current.rootWindowInsets.toPaddings()
     val scanState by BLEScannerService.scanState.collectAsState(BLEScannerService.ScanState.NONE)
@@ -83,6 +82,17 @@ internal fun ScannerScreen() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(64.dp)
+                        .clickable {
+                            when (scanState) {
+                                BLEScannerService.ScanState.STARTED -> {
+                                    BLEScannerService.start(context, BLEScannerService.ACTION_SCAN_STOP)
+                                }
+                                else -> {
+                                    // noop
+                                }
+                            }
+                            onSelect(device)
+                        }
                         .padding(start = 16.dp, end = 16.dp),
                 ) {
                     BasicText(
@@ -124,16 +134,15 @@ internal fun ScannerScreen() {
                     .fillMaxHeight()
                     .weight(1f)
                     .clickable(enabled = scanState != BLEScannerService.ScanState.NONE) {
-                        BLEScannerService.start(context) { intent ->
-                            when (scanState) {
-                                BLEScannerService.ScanState.NONE -> TODO()
-                                BLEScannerService.ScanState.STARTED -> {
-                                    intent.action = BLEScannerService.ACTION_SCAN_STOP
-                                }
-
-                                BLEScannerService.ScanState.STOPPED -> {
-                                    intent.action = BLEScannerService.ACTION_SCAN_START
-                                }
+                        when (scanState) {
+                            BLEScannerService.ScanState.STARTED -> {
+                                BLEScannerService.start(context, BLEScannerService.ACTION_SCAN_STOP)
+                            }
+                            BLEScannerService.ScanState.STOPPED -> {
+                                BLEScannerService.start(context, BLEScannerService.ACTION_SCAN_START)
+                            }
+                            else -> {
+                                // noop
                             }
                         }
                     }

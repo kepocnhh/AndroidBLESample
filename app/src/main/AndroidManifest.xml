@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
+        android:name=".App"
         android:theme="@style/App.Theme"
         android:label="${appName}_${buildType}">
         <activity android:name=".MainActivity"
