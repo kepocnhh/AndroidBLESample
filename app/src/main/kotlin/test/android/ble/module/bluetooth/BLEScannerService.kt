@@ -8,12 +8,15 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanRecord
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
@@ -144,8 +147,14 @@ internal class BLEScannerService : Service() {
         if (!isLocationEnabled) {
             throw BLEScannerException(Error.BT_LOCATION_DISABLED)
         }
+        val filter = ScanFilter.Builder().build()
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+//            .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .build()
         try {
-            scanner.startScan(callback)
+            scanner.startScan(listOf(filter), settings, callback)
         } catch (e: SecurityException) {
             throw BLEScannerException(Error.BT_NO_SCAN_PERMISSION)
         }
@@ -168,9 +177,14 @@ internal class BLEScannerService : Service() {
             .setContentTitle("scanning...")
             .setSmallIcon(R.drawable.bt)
             .addAction(-1, "stop", pendingIntent)
+            .setOngoing(true)
             .build()
         notificationManager.notify(NOTIFICATION_ID, notification)
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun onScanStart() {
@@ -296,11 +310,12 @@ internal class BLEScannerService : Service() {
         fun start(context: Context, builder: (Intent) -> Unit) {
             val intent = Intent(context, BLEScannerService::class.java)
             builder(intent)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+//            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+//                context.startForegroundService(intent)
+//            } else {
+//                context.startService(intent)
+//            }
+            context.startService(intent)
         }
     }
 }

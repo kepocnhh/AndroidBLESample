@@ -72,9 +72,18 @@ androidComponents.onVariants { variant ->
                     "$applicationId.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
                     "android.permission.BLUETOOTH",
                     "android.permission.BLUETOOTH_ADMIN",
+                    "android.permission.BLUETOOTH_ADVERTISE",
+                    "android.permission.BLUETOOTH_CONNECT",
+                    "android.permission.BLUETOOTH_SCAN",
+                    "android.permission.CHANGE_NETWORK_STATE",
+                    "android.permission.CHANGE_WIFI_STATE",
+                    "android.permission.CHANGE_WIFI_MULTICAST_STATE",
                     "android.permission.ACCESS_COARSE_LOCATION",
                     "android.permission.ACCESS_FINE_LOCATION",
+                    "android.permission.ACCESS_BACKGROUND_LOCATION",
                     "android.permission.FOREGROUND_SERVICE",
+                    "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+                    "android.permission.FOREGROUND_SERVICE_LOCATION",
                     "android.permission.POST_NOTIFICATIONS",
                 )
                 check(actual.sorted() == expected.sorted()) {

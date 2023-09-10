@@ -1,7 +1,6 @@
 package test.android.ble
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -25,9 +24,21 @@ internal class MainActivity : AppCompatActivity() {
             Manifest.permission.BLUETOOTH_ADMIN,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.CHANGE_NETWORK_STATE,
+            Manifest.permission.CHANGE_WIFI_STATE,
+            Manifest.permission.CHANGE_WIFI_MULTICAST_STATE,
         ).also {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                it.add(Manifest.permission.POST_NOTIFICATIONS,)
+                it.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                it.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                it.add(Manifest.permission.BLUETOOTH_SCAN)
+                it.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+                it.add(Manifest.permission.BLUETOOTH_CONNECT)
+                it.add(Manifest.permission.BLUETOOTH_SCAN)
             }
         }.toTypedArray()
     }
