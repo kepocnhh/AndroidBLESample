@@ -10,8 +10,10 @@ import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanRecord
 import android.bluetooth.le.ScanResult
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
@@ -81,50 +83,31 @@ internal class BLEScannerService : Service() {
             // todo
         }
     }
-
-    private fun ScanRecord.getData(): Map<Int, String> {
-        val result = mutableMapOf<Int, String>()
-        var index = 0
-        val bytes = bytes
-        while (index < bytes.size) {
-            val length = bytes[index++]
-            if (length.toInt() == 0) break
-            val type = bytes[index]
-            if (type.toInt() == 0) break
-            val data = bytes.copyOfRange(index + 1, index + length)
-            if (data.isEmpty()) break
-            val hex = StringBuilder(data.size * 2)
-            for (i in data.indices.reversed()) {
-                hex.append(String.format("%02X", data[i]))
+    private val btReceiver = object : BroadcastReceiver() {
+        private fun onReceive(intent: Intent) {
+            when (intent.action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                        BluetoothAdapter.STATE_OFF -> {
+                            onScanStop()
+                        }
+                        BluetoothAdapter.STATE_ON -> {
+                            // todo
+                        }
+                        else -> {
+                            // noop
+                        }
+                    }
+                }
+                else -> {
+                    // noop
+                }
             }
-            result[type.toInt()] = hex.toString()
-            index += length
         }
-        return result
-    }
 
-    private fun ScanRecord.getName(): String? {
-        val type = 0x09
-        var index = 0
-        val bytes = bytes
-        while (index < bytes.size) {
-            val length = bytes[index++]
-            if (length.toInt() == 0) break
-            if (bytes[index].toInt() != type) {
-                index += length
-                break
-            }
-            val data = bytes.copyOfRange(index + 1, index + length)
-            if (data.isEmpty()) break
-            val hex = StringBuilder(data.size * 2)
-            var b = data.lastIndex
-            while (b >= 0) {
-                hex.append(String.format("%02X", data[b]))
-                b--
-            }
-            return hex.toString()
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent != null) onReceive(intent)
         }
-        return null
     }
 
     private fun getBluetoothAdapter(): BluetoothAdapter {
@@ -184,7 +167,6 @@ internal class BLEScannerService : Service() {
     }
 
     private fun onScanStart() {
-        startForeground()
         scope.launch {
             _scanState.value = ScanState.NONE
             runCatching {
@@ -194,6 +176,8 @@ internal class BLEScannerService : Service() {
                 }
             }.fold(
                 onSuccess = {
+                    startForeground()
+                    registerReceiver(btReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
                     _scanState.value = ScanState.STARTED
                 },
                 onFailure = {
@@ -236,6 +220,7 @@ internal class BLEScannerService : Service() {
                 },
             )
             stopForeground(STOP_FOREGROUND_REMOVE)
+            unregisterReceiver(btReceiver)
         }
     }
 
