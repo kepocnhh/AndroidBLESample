@@ -83,7 +83,7 @@ internal class BLEScannerService : Service() {
             // todo
         }
     }
-    private val btReceiver = object : BroadcastReceiver() {
+    private val receivers = object : BroadcastReceiver() {
         private fun onReceive(intent: Intent) {
             when (intent.action) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
@@ -97,6 +97,13 @@ internal class BLEScannerService : Service() {
                         else -> {
                             // noop
                         }
+                    }
+                }
+                LocationManager.PROVIDERS_CHANGED_ACTION -> {
+                    val locationManager = getSystemService(LocationManager::class.java)
+                    val isLocationEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    if (!isLocationEnabled) {
+                        onScanStop()
                     }
                 }
                 else -> {
@@ -177,7 +184,11 @@ internal class BLEScannerService : Service() {
             }.fold(
                 onSuccess = {
                     startForeground()
-                    registerReceiver(btReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
+                    val filter = IntentFilter().also {
+                        it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                        it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+                    }
+                    registerReceiver(receivers, filter)
                     _scanState.value = ScanState.STARTED
                 },
                 onFailure = {
@@ -220,7 +231,7 @@ internal class BLEScannerService : Service() {
                 },
             )
             stopForeground(STOP_FOREGROUND_REMOVE)
-            unregisterReceiver(btReceiver)
+            unregisterReceiver(receivers)
         }
     }
 
