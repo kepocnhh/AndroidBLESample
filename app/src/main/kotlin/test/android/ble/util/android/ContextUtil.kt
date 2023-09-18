@@ -8,7 +8,7 @@ internal fun Context.showToast(message: CharSequence, duration: Int = Toast.LENG
     Toast.makeText(this, message, duration).show()
 }
 
-internal fun Context.allGranted(permissions: Array<String>): Boolean {
+internal fun Context.isAllGranted(permissions: Array<String>): Boolean {
     return permissions.all(::isGranted)
 }
 
