@@ -285,22 +285,7 @@ internal class BLEScannerService : Service() {
         fun start(context: Context, action: String) {
             val intent = Intent(context, BLEScannerService::class.java)
             intent.action = action
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-        }
-
-        @Deprecated(message = "start(Context, String)", level = DeprecationLevel.ERROR)
-        fun start(context: Context, builder: (Intent) -> Unit) {
-            val intent = Intent(context, BLEScannerService::class.java)
-            builder(intent)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            context.startService(intent)
         }
     }
 }
