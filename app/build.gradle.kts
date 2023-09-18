@@ -18,7 +18,7 @@ android {
         applicationId = appId
         minSdk = Version.Android.minSdk
         targetSdk = Version.Android.targetSdk
-        versionCode = 2
+        versionCode = 3
         versionName = "0.0.$versionCode"
         manifestPlaceholders["appName"] = "@string/app_name"
     }
@@ -72,6 +72,7 @@ androidComponents.onVariants { variant ->
                     "$applicationId.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
                     "android.permission.BLUETOOTH",
                     "android.permission.BLUETOOTH_ADMIN",
+                    "android.permission.ACCESS_BACKGROUND_LOCATION",
                     "android.permission.ACCESS_COARSE_LOCATION",
                     "android.permission.ACCESS_FINE_LOCATION",
                     "android.permission.FOREGROUND_SERVICE",
@@ -92,4 +93,6 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.7.2")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("androidx.compose.foundation:foundation:${Version.Android.compose}")
+//    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.5.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
 }

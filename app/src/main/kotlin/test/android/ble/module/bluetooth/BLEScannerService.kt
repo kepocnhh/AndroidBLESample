@@ -10,8 +10,10 @@ import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanRecord
 import android.bluetooth.le.ScanResult
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
@@ -81,50 +83,38 @@ internal class BLEScannerService : Service() {
             // todo
         }
     }
-
-    private fun ScanRecord.getData(): Map<Int, String> {
-        val result = mutableMapOf<Int, String>()
-        var index = 0
-        val bytes = bytes
-        while (index < bytes.size) {
-            val length = bytes[index++]
-            if (length.toInt() == 0) break
-            val type = bytes[index]
-            if (type.toInt() == 0) break
-            val data = bytes.copyOfRange(index + 1, index + length)
-            if (data.isEmpty()) break
-            val hex = StringBuilder(data.size * 2)
-            for (i in data.indices.reversed()) {
-                hex.append(String.format("%02X", data[i]))
+    private val receivers = object : BroadcastReceiver() {
+        private fun onReceive(intent: Intent) {
+            when (intent.action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                        BluetoothAdapter.STATE_OFF -> {
+                            onScanStop()
+                        }
+                        BluetoothAdapter.STATE_ON -> {
+                            // todo
+                        }
+                        else -> {
+                            // noop
+                        }
+                    }
+                }
+                LocationManager.PROVIDERS_CHANGED_ACTION -> {
+                    val locationManager = getSystemService(LocationManager::class.java)
+                    val isLocationEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    if (!isLocationEnabled) {
+                        onScanStop()
+                    }
+                }
+                else -> {
+                    // noop
+                }
             }
-            result[type.toInt()] = hex.toString()
-            index += length
         }
-        return result
-    }
 
-    private fun ScanRecord.getName(): String? {
-        val type = 0x09
-        var index = 0
-        val bytes = bytes
-        while (index < bytes.size) {
-            val length = bytes[index++]
-            if (length.toInt() == 0) break
-            if (bytes[index].toInt() != type) {
-                index += length
-                break
-            }
-            val data = bytes.copyOfRange(index + 1, index + length)
-            if (data.isEmpty()) break
-            val hex = StringBuilder(data.size * 2)
-            var b = data.lastIndex
-            while (b >= 0) {
-                hex.append(String.format("%02X", data[b]))
-                b--
-            }
-            return hex.toString()
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent != null) onReceive(intent)
         }
-        return null
     }
 
     private fun getBluetoothAdapter(): BluetoothAdapter {
@@ -184,7 +174,6 @@ internal class BLEScannerService : Service() {
     }
 
     private fun onScanStart() {
-        startForeground()
         scope.launch {
             _scanState.value = ScanState.NONE
             runCatching {
@@ -194,6 +183,12 @@ internal class BLEScannerService : Service() {
                 }
             }.fold(
                 onSuccess = {
+                    startForeground()
+                    val filter = IntentFilter().also {
+                        it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                        it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+                    }
+                    registerReceiver(receivers, filter)
                     _scanState.value = ScanState.STARTED
                 },
                 onFailure = {
@@ -236,6 +231,7 @@ internal class BLEScannerService : Service() {
                 },
             )
             stopForeground(STOP_FOREGROUND_REMOVE)
+            unregisterReceiver(receivers)
         }
     }
 
@@ -286,14 +282,10 @@ internal class BLEScannerService : Service() {
         private val _scanState = MutableStateFlow(ScanState.STOPPED)
         val scanState = _scanState.asStateFlow()
 
-        fun start(context: Context, builder: (Intent) -> Unit) {
+        fun start(context: Context, action: String) {
             val intent = Intent(context, BLEScannerService::class.java)
-            builder(intent)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            intent.action = action
+            context.startService(intent)
         }
     }
 }
