@@ -3,17 +3,17 @@ package test.android.ble.util.compose
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.State
-import androidx.lifecycle.Lifecycle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 internal fun AppCompatActivity.permissionsRequester(): PermissionsRequester {
-    if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) TODO()
+//    if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) TODO()
     return PermissionsRequester(this)
 }
 
 internal fun State<Map<Int, Boolean>>.isAllRequested(permissions: Array<String>): Boolean {
-    return value[permissions.sorted().hashCode()] ?: false
+    val key = permissions.sorted().hashCode()
+    return value[key] ?: false
 }
 
 internal class PermissionsRequester private constructor(
@@ -24,7 +24,8 @@ internal class PermissionsRequester private constructor(
 
     private val launcher = activity.registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val map = flow.value.toMutableMap()
-        map[it.keys.sorted().hashCode()] = true
+        val key = it.keys.sorted().hashCode()
+        map[key] = true
         flow.value = map
     }
 
