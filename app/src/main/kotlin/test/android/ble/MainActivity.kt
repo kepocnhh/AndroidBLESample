@@ -27,7 +27,10 @@ internal class MainActivity : AppCompatActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION,
         ).also {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                it.add(Manifest.permission.POST_NOTIFICATIONS,)
+                it.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                it.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
             }
         }.toTypedArray()
     }
