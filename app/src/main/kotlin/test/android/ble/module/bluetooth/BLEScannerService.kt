@@ -17,6 +17,7 @@ import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,12 +88,11 @@ internal class BLEScannerService : Service() {
         private fun onReceive(intent: Intent) {
             when (intent.action) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
-                    when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                    val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                    Log.d(TAG, "Bluetooth adapter state: $state")
+                    when (state) {
                         BluetoothAdapter.STATE_OFF -> {
                             onScanStop()
-                        }
-                        BluetoothAdapter.STATE_ON -> {
-                            // todo
                         }
                         else -> {
                             // noop
@@ -101,9 +101,16 @@ internal class BLEScannerService : Service() {
                 }
                 LocationManager.PROVIDERS_CHANGED_ACTION -> {
                     val locationManager = getSystemService(LocationManager::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val name = intent.getStringExtra(LocationManager.EXTRA_PROVIDER_NAME)
+                        if (name != LocationManager.GPS_PROVIDER) return
+                    }
                     val isLocationEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    Log.d(TAG, "isLocationEnabled: $isLocationEnabled")
                     if (!isLocationEnabled) {
-                        onScanStop()
+                        if (scanState.value == ScanState.STARTED) {
+                            onScanStop()
+                        }
                     }
                 }
                 else -> {
