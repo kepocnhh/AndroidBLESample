@@ -95,8 +95,8 @@ internal class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Build.VERSION.SDK_INT: ${Build.VERSION.SDK_INT}")
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 val permissions = arrayOf(
-                    Manifest.permission.BLUETOOTH,
-                    Manifest.permission.BLUETOOTH_ADMIN,
+//                    Manifest.permission.BLUETOOTH,
+//                    Manifest.permission.BLUETOOTH_ADMIN,
                     Manifest.permission.ACCESS_COARSE_LOCATION,
                     Manifest.permission.ACCESS_FINE_LOCATION,
                 )
