@@ -1,14 +1,10 @@
 package test.android.ble.module.bluetooth
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanRecord
 import android.bluetooth.le.ScanResult
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -18,7 +14,6 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,9 +23,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import test.android.ble.R
 import test.android.ble.entity.BluetoothDevice
-import kotlin.math.absoluteValue
+import test.android.ble.util.ForegroundUtil
 
 internal class BLEScannerException(val error: BLEScannerService.Error) : Exception()
 
@@ -166,21 +160,8 @@ internal class BLEScannerService : Service() {
         scanner.stopScan(callback)
     }
 
-    private fun startForeground() {
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        val intent = Intent(this, BLEScannerService::class.java)
-        intent.action = ACTION_SCAN_STOP
-        val pendingIntent = PendingIntent.getService(this, -1, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT)
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("scanning...")
-            .setSmallIcon(R.drawable.bt)
-            .addAction(-1, "stop", pendingIntent)
-            .build()
-        notificationManager.notify(NOTIFICATION_ID, notification)
-        startForeground(NOTIFICATION_ID, notification)
-    }
-
     private fun onScanStart() {
+        val service: Service = this
         scope.launch {
             _scanState.value = ScanState.NONE
             runCatching {
@@ -190,7 +171,14 @@ internal class BLEScannerService : Service() {
                 }
             }.fold(
                 onSuccess = {
-                    startForeground()
+                    val intent = Intent(service, BLEScannerService::class.java)
+                    intent.action = ACTION_SCAN_STOP
+                    ForegroundUtil.startForeground(
+                        service = service,
+                        title = "scanning...",
+                        action = "stop",
+                        intent = intent,
+                    )
                     val filter = IntentFilter().also {
                         it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
                         it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
@@ -242,23 +230,6 @@ internal class BLEScannerService : Service() {
         }
     }
 
-    override fun onCreate() {
-        super.onCreate()
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel: NotificationChannel? = notificationManager.getNotificationChannel(CHANNEL_ID)
-            if (channel == null) {
-                notificationManager.createNotificationChannel(
-                    NotificationChannel(
-                        CHANNEL_ID,
-                        CHANNEL_NAME,
-                        NotificationManager.IMPORTANCE_HIGH,
-                    ),
-                )
-            }
-        }
-    }
-
     private fun onStartCommand(intent: Intent) {
         when (intent.action) {
             ACTION_SCAN_START -> onScanStart()
@@ -279,10 +250,6 @@ internal class BLEScannerService : Service() {
         private const val TAG = "[BLEScanner]"
         val ACTION_SCAN_START = "${this::class.java.name}:ACTION_SCAN_START"
         val ACTION_SCAN_STOP = "${this::class.java.name}:ACTION_SCAN_STOP"
-
-        private val CHANNEL_ID = "${this::class.java.name}:CHANNEL:BLEScanner"
-        private const val CHANNEL_NAME = "BLE Scanner"
-        private val NOTIFICATION_ID = System.currentTimeMillis().toInt().absoluteValue
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
         val broadcast = _broadcast.asSharedFlow()
