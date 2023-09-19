@@ -96,7 +96,7 @@ internal fun DeviceScreen(
                         .fillMaxWidth()
                         .height(64.dp)
                         .clickable {
-                            TODO()
+                            BLEGattService.disconnect(context)
                         }
                         .wrapContentHeight(),
                     text = "disconnect",
