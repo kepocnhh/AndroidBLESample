@@ -29,18 +29,29 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
+import test.android.ble.util.android.scanStart
+import test.android.ble.util.android.scanStop
 import kotlin.time.Duration.Companion.seconds
-
-internal class BLEGattException(val error: BLEGattService.Error) : Exception()
 
 internal class BLEGattService : Service() {
     sealed interface Broadcast {
-        class OnError(val error: Error?) : Broadcast
+        class OnError(val error: Throwable) : Broadcast
     }
 
     sealed interface State {
-        object None : State
-        data class Search(val address: String) : State
+        object Waiting : State
+        data class Connecting(val address: String) : State
+        data class Search(
+            val address: String,
+            val type: Type,
+        ) : State {
+            enum class Type {
+                WAITING,
+                STARTING,
+                STOPPING,
+                COMING,
+            }
+        }
         data class Connected(val address: String) : State
         object Disconnected : State
     }
@@ -58,15 +69,22 @@ internal class BLEGattService : Service() {
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             Log.d(TAG, "on scan result: callback $callbackType result $result")
-            if (result == null) return
-            val scanRecord = result.scanRecord ?: return
-            val device = result.device ?: return
-            val btDevice = BTDevice(
-                address = device.address ?: return,
-                name = device.name ?: return,
-                rawData = scanRecord.bytes ?: return,
-            )
-            // todo
+            when (val bleState = state.value) {
+                is State.Search -> {
+                    when (bleState.type) {
+                        State.Search.Type.COMING -> {
+                            if (result == null) return
+                            val scanRecord = result.scanRecord ?: return
+                            val device = result.device ?: return
+                            if (device.address == bleState.address) {
+                                // todo
+                            }
+                        }
+                        else -> TODO("onScanResult search ${bleState.type}")
+                    }
+                }
+                else -> TODO("onScanResult bleState: $bleState")
+            }
         }
     }
     private val gattCallback = object : BluetoothGattCallback() {
@@ -123,25 +141,45 @@ internal class BLEGattService : Service() {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                     Log.d(TAG, "Bluetooth adapter state: $state")
-                    /*
                     when (state) {
                         BluetoothAdapter.STATE_OFF -> {
-                            if (connectState.value == ConnectState.DISCONNECTED) return
-                            if (connecteds.values.isEmpty()) return
-                            stopForeground(STOP_FOREGROUND_REMOVE)
-                            _connectState.value = ConnectState.NONE // todo no BT
+                            when (val bleState = BLEGattService.state.value) {
+                                is State.Search -> {
+                                    when (bleState.type) {
+                                        State.Search.Type.COMING -> {
+                                            onScanStop()
+                                        }
+                                        else -> {
+                                            // todo
+                                        }
+                                    }
+                                }
+                                else -> {
+                                    // todo
+                                }
+                            }
                         }
                         BluetoothAdapter.STATE_ON -> {
-                            if (connectState.value == ConnectState.DISCONNECTED) return
-                            val gatts = connecteds.values
-                            if (gatts.isEmpty()) return
-                            onBTStateOn(gatts.single())
+                            when (val bleState = BLEGattService.state.value) {
+                                is State.Search -> {
+                                    when (bleState.type) {
+                                        State.Search.Type.WAITING -> {
+                                            onScanStart()
+                                        }
+                                        else -> {
+                                            // todo
+                                        }
+                                    }
+                                }
+                                else -> {
+                                    // todo
+                                }
+                            }
                         }
                         else -> {
                             // noop
                         }
                     }
-                    */
                 }
                 LocationManager.PROVIDERS_CHANGED_ACTION -> {
                     val locationManager = getSystemService(LocationManager::class.java)
@@ -163,6 +201,84 @@ internal class BLEGattService : Service() {
 
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent != null) onReceive(intent)
+        }
+    }
+
+    private fun onScanStart() {
+        Log.d(TAG, "scan start...")
+        val service: Service = this
+        scope.launch {
+            val state = state.value
+            if (state !is State.Search) TODO()
+            if (state.type != State.Search.Type.WAITING) TODO()
+            _state.value = State.Search(
+                address = state.address,
+                type = State.Search.Type.STARTING,
+            )
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    scanStart(scanCallback)
+                }
+            }.fold(
+                onSuccess = {
+                    val intent = Intent(service, BLEGattService::class.java)
+                    intent.action = ACTION_SEARCH_STOP
+                    ForegroundUtil.startForeground(
+                        service = service,
+                        title = "searching ${state.address}...",
+                        action = "stop",
+                        intent = intent,
+                    )
+                    _state.value = State.Search(
+                        address = state.address,
+                        type = State.Search.Type.COMING,
+                    )
+                },
+                onFailure = {
+                    _broadcast.emit(Broadcast.OnError(it))
+                    _state.value = State.Disconnected
+                    unregisterReceiver(receivers)
+                },
+            )
+        }
+    }
+
+    private fun onScanStop() {
+        Log.d(TAG, "scan stop...")
+        val service: Service = this
+        scope.launch {
+            val state = state.value
+            if (state !is State.Search) TODO()
+            if (state.type != State.Search.Type.COMING) TODO()
+            _state.value = State.Search(
+                address = state.address,
+                type = State.Search.Type.STOPPING,
+            )
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    scanStop(scanCallback)
+                }
+            }.fold(
+                onSuccess = {
+                    val intent = Intent(service, BLEGattService::class.java)
+                    intent.action = ACTION_SEARCH_STOP
+                    ForegroundUtil.startForeground(
+                        service = service,
+                        title = "search waiting...",
+                        action = "stop",
+                        intent = intent,
+                    )
+                    _state.value = State.Search(
+                        address = state.address,
+                        type = State.Search.Type.WAITING,
+                    )
+                },
+                onFailure = {
+                    _broadcast.emit(Broadcast.OnError(it))
+                    _state.value = State.Disconnected
+                    unregisterReceiver(receivers)
+                },
+            )
         }
     }
 
@@ -205,30 +321,35 @@ internal class BLEGattService : Service() {
         if (state.value != State.Disconnected) TODO("connect state: $state")
         val context: Context = this
         scope.launch {
-            _state.value = State.None
+            _state.value = State.Connecting(address = address)
             runCatching {
-                val adapter = getBluetoothAdapter(context)
                 withContext(Dispatchers.Default) {
-                    val device = adapter.getRemoteDevice(address)
-                    Log.d(TAG, "device: $device")
-                    val autoConnect = false
-                    try {
-                        // todo timeout
-                        device.connectGatt(context, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
-                    } catch (e: SecurityException) {
-                        throw BLEGattException(Error.BT_NO_CONNECT_PERMISSION)
-                    }
+                    scanStart(scanCallback)
                 }
             }.fold(
                 onSuccess = {
-                    Log.d(TAG, "Device $address connecting...")
-                    // todo
+                    val intent = Intent(service, BLEGattService::class.java)
+                    intent.action = ACTION_SEARCH_STOP
+                    ForegroundUtil.startForeground(
+                        service = service,
+                        title = "searching $address...",
+                        action = "stop",
+                        intent = intent,
+                    )
+                    val filter = IntentFilter().also {
+                        it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                        it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+                    }
+                    _state.value = State.Search(
+                        address = address,
+                        type = State.Search.Type.COMING,
+                    )
+                    registerReceiver(receivers, filter)
                 },
                 onFailure = {
-                    val error = (it as? BLEGattException)?.error
-                    _broadcast.emit(Broadcast.OnError(error))
+                    _broadcast.emit(Broadcast.OnError(it))
                     _state.value = State.Disconnected
-                }
+                },
             )
         }
     }
@@ -266,9 +387,14 @@ internal class BLEGattService : Service() {
     }
     */
 
+    private fun onStopSearch() {
+        TODO()
+    }
+
     private fun onStartCommand(intent: Intent) {
         when (intent.action) {
             ACTION_CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
+            ACTION_SEARCH_STOP -> onStopSearch()
 //            ACTION_DISCONNECT -> onDisconnect()
         }
     }
@@ -286,6 +412,7 @@ internal class BLEGattService : Service() {
         private const val TAG = "[Gatt]"
         private val ACTION_CONNECT = "${this::class.java.name}:ACTION_CONNECT"
         private val ACTION_DISCONNECT = "${this::class.java.name}:ACTION_DISCONNECT"
+        private val ACTION_SEARCH_STOP = "${this::class.java.name}:ACTION_SEARCH_STOP"
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
         val broadcast = _broadcast.asSharedFlow()
@@ -303,19 +430,6 @@ internal class BLEGattService : Service() {
             val intent = Intent(context, BLEGattService::class.java)
             intent.action = ACTION_DISCONNECT
             context.startService(intent)
-        }
-
-        private fun getBluetoothAdapter(context: Context): BluetoothAdapter {
-            val bluetoothManager = context.getSystemService(BluetoothManager::class.java)
-            val adapter: BluetoothAdapter = bluetoothManager.adapter
-                ?: throw BLEGattException(Error.BT_NO_ADAPTER)
-            val isEnabled = try {
-                adapter.isEnabled
-            } catch (e: SecurityException) {
-                throw BLEGattException(Error.BT_NO_PERMISSION)
-            }
-            if (!isEnabled) throw BLEGattException(Error.BT_ADAPTER_DISABLED)
-            return adapter
         }
     }
 
