@@ -1,6 +1,7 @@
 package test.android.ble.entity
 
-internal data class BluetoothDevice(
+internal class BTDevice(
     val address: String,
     val name: String,
+    val rawData: ByteArray,
 )

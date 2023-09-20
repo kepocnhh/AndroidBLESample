@@ -6,11 +6,6 @@ import androidx.compose.runtime.State
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-internal fun AppCompatActivity.permissionsRequester(): PermissionsRequester {
-//    if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) TODO()
-    return PermissionsRequester(this)
-}
-
 internal fun State<Map<Int, Boolean>>.isAllRequested(permissions: Array<String>): Boolean {
     val key = permissions.sorted().hashCode()
     return value[key] ?: false

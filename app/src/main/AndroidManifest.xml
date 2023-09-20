@@ -22,5 +22,7 @@
         <service android:name=".module.bluetooth.BLEScannerService"
             android:exported="false"
             android:foregroundServiceType="location|connectedDevice"/>
+        <service android:name=".module.bluetooth.BLEGattService"
+            android:exported="false"/>
     </application>
 </manifest>

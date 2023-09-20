@@ -1,5 +1,6 @@
 package test.android.ble.module.scanner
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -29,29 +30,48 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import test.android.ble.entity.BluetoothDevice
+import test.android.ble.entity.BTDevice
 import test.android.ble.module.bluetooth.BLEScannerService
+import test.android.ble.util.android.BLEException
+import test.android.ble.util.android.BTException
+import test.android.ble.util.android.LocException
 import test.android.ble.util.android.showToast
 import test.android.ble.util.compose.toPaddings
 
 @Composable
-internal fun ScannerScreen(onSelect: (BluetoothDevice) -> Unit) {
+internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
+    val TAG = "[Scanner|Screen]"
     val context = LocalContext.current
     val insets = LocalView.current.rootWindowInsets.toPaddings()
     val scanState by BLEScannerService.scanState.collectAsState(BLEScannerService.ScanState.NONE)
-    val devicesState = remember { mutableStateOf(listOf<BluetoothDevice>()) }
+    val devicesState = remember { mutableStateOf(listOf<BTDevice>()) }
     LaunchedEffect(Unit) {
         BLEScannerService.broadcast.collect { broadcast ->
             when (broadcast) {
                 is BLEScannerService.Broadcast.OnError -> {
                     when (broadcast.error) {
-                        BLEScannerService.Error.BT_NO_ADAPTER -> context.showToast("No adapter!")
-                        BLEScannerService.Error.BT_NO_PERMISSION -> context.showToast("No permission!")
-                        BLEScannerService.Error.BT_ADAPTER_DISABLED -> context.showToast("Adapter disabled!")
-                        BLEScannerService.Error.BT_NO_SCANNER -> context.showToast("No scanner!")
-                        BLEScannerService.Error.BT_NO_SCAN_PERMISSION -> context.showToast("No scan permission!")
-                        BLEScannerService.Error.BT_LOCATION_DISABLED -> context.showToast("Location disabled!")
-                        null -> context.showToast("Unknown error!")
+                        is BTException -> {
+                            when (broadcast.error.error) {
+                                BTException.Error.NO_ADAPTER -> context.showToast("No adapter!")
+                                BTException.Error.NO_PERMISSION -> context.showToast("No permission!")
+                                BTException.Error.DISABLED -> context.showToast("Adapter disabled!")
+                            }
+                        }
+                        is LocException -> {
+                            when (broadcast.error.error) {
+                                LocException.Error.DISABLED -> context.showToast("Location disabled!")
+                            }
+                        }
+                        is BLEException -> {
+                            when (broadcast.error.error) {
+                                BLEException.Error.NO_SCANNER -> context.showToast("No scanner!")
+                                BLEException.Error.NO_SCAN_PERMISSION -> context.showToast("No scan permission!")
+                            }
+                        }
+                        else -> {
+                            Log.w(TAG, "BLE scanner unknown error: ${broadcast.error}")
+                            context.showToast("Unknown error!")
+                        }
                     }
                 }
                 is BLEScannerService.Broadcast.OnBTDevice -> {
