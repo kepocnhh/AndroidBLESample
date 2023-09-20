@@ -37,7 +37,7 @@ internal fun DeviceScreen(
 ) {
     val context = LocalContext.current
     val insets = LocalView.current.rootWindowInsets.toPaddings()
-    val connectState by BLEGattService.connectState.collectAsState()
+    val gattState by BLEGattService.state.collectAsState()
     LaunchedEffect(Unit) {
         BLEGattService.broadcast.collect { broadcast ->
             when (broadcast) {
@@ -77,8 +77,8 @@ internal fun DeviceScreen(
             color = Color.Black,
             fontSize = 16.sp,
         )
-        when (connectState) {
-            BLEGattService.ConnectState.NONE -> {
+        when (gattState) {
+            BLEGattService.State.None -> {
                 BasicText(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -89,7 +89,7 @@ internal fun DeviceScreen(
                     style = textStyle,
                 )
             }
-            BLEGattService.ConnectState.CONNECTED -> {
+            is BLEGattService.State.Connected -> {
                 BasicText(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -103,7 +103,7 @@ internal fun DeviceScreen(
                     style = textStyle,
                 )
             }
-            BLEGattService.ConnectState.DISCONNECTED -> {
+            BLEGattService.State.Disconnected -> {
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -131,6 +131,9 @@ internal fun DeviceScreen(
                         style = textStyle,
                     )
                 }
+            }
+            is BLEGattService.State.Search -> {
+                // todo stop search
             }
         }
     }

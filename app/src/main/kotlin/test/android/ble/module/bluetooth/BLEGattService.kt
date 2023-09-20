@@ -38,10 +38,11 @@ internal class BLEGattService : Service() {
         class OnError(val error: Error?) : Broadcast
     }
 
-    enum class ConnectState {
-        NONE,
-        CONNECTED,
-        DISCONNECTED,
+    sealed interface State {
+        object None : State
+        data class Search(val address: String) : State
+        data class Connected(val address: String) : State
+        object Disconnected : State
     }
 
     enum class Error {
@@ -77,13 +78,13 @@ internal class BLEGattService : Service() {
                     when (newState) {
                         BluetoothProfile.STATE_CONNECTED -> {
                             connecteds[gatt.device.address] = gatt
-                            _connectState.value = ConnectState.CONNECTED
+                            _state.value = State.Connected(address = gatt.device.address)
                             val service: Service = this@BLEGattService
                             val intent = Intent(service, BLEGattService::class.java)
                             intent.action = ACTION_DISCONNECT
                             ForegroundUtil.startForeground(
                                 service = service,
-                                title = "connected",
+                                title = "connected ${gatt.device.address}",
                                 action = "disconnect",
                                 intent = intent,
                             )
@@ -93,6 +94,7 @@ internal class BLEGattService : Service() {
                             }
                             registerReceiver(receivers, filter)
                         }
+                        /*
                         BluetoothProfile.STATE_DISCONNECTED -> {
                             connecteds.remove(gatt.device.address)
                             _connectState.value = ConnectState.DISCONNECTED
@@ -103,6 +105,7 @@ internal class BLEGattService : Service() {
                             }
                             Log.d(TAG, "Device ${gatt.device.address} disconnected.")
                         }
+                        */
                         else -> {
                             TODO("Gatt newState: $newState")
                         }
@@ -120,6 +123,7 @@ internal class BLEGattService : Service() {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                     Log.d(TAG, "Bluetooth adapter state: $state")
+                    /*
                     when (state) {
                         BluetoothAdapter.STATE_OFF -> {
                             if (connectState.value == ConnectState.DISCONNECTED) return
@@ -137,6 +141,7 @@ internal class BLEGattService : Service() {
                             // noop
                         }
                     }
+                    */
                 }
                 LocationManager.PROVIDERS_CHANGED_ACTION -> {
                     val locationManager = getSystemService(LocationManager::class.java)
@@ -161,6 +166,7 @@ internal class BLEGattService : Service() {
         }
     }
 
+    /*
     private fun onBTStateOn(gatt: BluetoothGatt) {
         val context: Context = this
         val bluetoothManager = getSystemService(BluetoothManager::class.java)
@@ -191,14 +197,15 @@ internal class BLEGattService : Service() {
             )
         }
     }
+    */
 
     private fun onConnect(address: String) {
         Log.d(TAG, "connect $address...")
         val service: Service = this
-        if (connectState.value != ConnectState.DISCONNECTED) TODO("connect state: ${connectState.value}")
+        if (state.value != State.Disconnected) TODO("connect state: $state")
         val context: Context = this
         scope.launch {
-            _connectState.value = ConnectState.NONE
+            _state.value = State.None
             runCatching {
                 val adapter = getBluetoothAdapter(context)
                 withContext(Dispatchers.Default) {
@@ -220,12 +227,13 @@ internal class BLEGattService : Service() {
                 onFailure = {
                     val error = (it as? BLEGattException)?.error
                     _broadcast.emit(Broadcast.OnError(error))
-                    _connectState.value = ConnectState.DISCONNECTED
+                    _state.value = State.Disconnected
                 }
             )
         }
     }
 
+    /*
     private fun onDisconnect() {
         Log.d(TAG, "disconnect...")
         if (connectState.value != ConnectState.CONNECTED) TODO("connect state: ${connectState.value}")
@@ -256,11 +264,12 @@ internal class BLEGattService : Service() {
             stopForeground(STOP_FOREGROUND_REMOVE)
         }
     }
+    */
 
     private fun onStartCommand(intent: Intent) {
         when (intent.action) {
             ACTION_CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
-            ACTION_DISCONNECT -> onDisconnect()
+//            ACTION_DISCONNECT -> onDisconnect()
         }
     }
 
@@ -280,8 +289,8 @@ internal class BLEGattService : Service() {
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
         val broadcast = _broadcast.asSharedFlow()
-        private val _connectState = MutableStateFlow(ConnectState.DISCONNECTED)
-        val connectState = _connectState.asStateFlow()
+        private val _state = MutableStateFlow<State>(State.Disconnected)
+        val state = _state.asStateFlow()
 
         fun connect(context: Context, address: String) {
             val intent = Intent(context, BLEGattService::class.java)
