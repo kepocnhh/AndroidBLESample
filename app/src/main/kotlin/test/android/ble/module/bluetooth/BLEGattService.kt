@@ -7,6 +7,8 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
 import kotlin.time.Duration.Companion.seconds
 
@@ -51,8 +54,21 @@ internal class BLEGattService : Service() {
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Main + job)
     private val connecteds = mutableMapOf<String, BluetoothGatt>()
-
-    private val callback = object : BluetoothGattCallback() {
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult?) {
+            Log.d(TAG, "on scan result: callback $callbackType result $result")
+            if (result == null) return
+            val scanRecord = result.scanRecord ?: return
+            val device = result.device ?: return
+            val btDevice = BTDevice(
+                address = device.address ?: return,
+                name = device.name ?: return,
+                rawData = scanRecord.bytes ?: return,
+            )
+            // todo
+        }
+    }
+    private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             if (gatt == null) return // todo
             Log.d(TAG, "on connection state change $status $newState")
@@ -155,7 +171,7 @@ internal class BLEGattService : Service() {
                 when (state) {
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         val autoConnect = false
-                        gatt.device.connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)
+                        gatt.device.connectGatt(context, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
                     }
                     BluetoothProfile.STATE_CONNECTED -> {
                         _connectState.value = ConnectState.CONNECTED
@@ -191,7 +207,7 @@ internal class BLEGattService : Service() {
                     val autoConnect = false
                     try {
                         // todo timeout
-                        device.connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)
+                        device.connectGatt(context, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
                     } catch (e: SecurityException) {
                         throw BLEGattException(Error.BT_NO_CONNECT_PERMISSION)
                     }

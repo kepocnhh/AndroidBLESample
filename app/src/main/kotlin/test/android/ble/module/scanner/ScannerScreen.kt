@@ -29,17 +29,17 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import test.android.ble.entity.BluetoothDevice
+import test.android.ble.entity.BTDevice
 import test.android.ble.module.bluetooth.BLEScannerService
 import test.android.ble.util.android.showToast
 import test.android.ble.util.compose.toPaddings
 
 @Composable
-internal fun ScannerScreen(onSelect: (BluetoothDevice) -> Unit) {
+internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
     val context = LocalContext.current
     val insets = LocalView.current.rootWindowInsets.toPaddings()
     val scanState by BLEScannerService.scanState.collectAsState(BLEScannerService.ScanState.NONE)
-    val devicesState = remember { mutableStateOf(listOf<BluetoothDevice>()) }
+    val devicesState = remember { mutableStateOf(listOf<BTDevice>()) }
     LaunchedEffect(Unit) {
         BLEScannerService.broadcast.collect { broadcast ->
             when (broadcast) {

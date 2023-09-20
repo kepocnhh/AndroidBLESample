@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import test.android.ble.entity.BluetoothDevice
+import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
 
 internal class BLEScannerException(val error: BLEScannerService.Error) : Exception()
@@ -31,7 +31,7 @@ internal class BLEScannerException(val error: BLEScannerService.Error) : Excepti
 internal class BLEScannerService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Error?) : Broadcast
-        class OnBTDevice(val device: BluetoothDevice) : Broadcast
+        class OnBTDevice(val device: BTDevice) : Broadcast
     }
 
     enum class ScanState {
@@ -57,9 +57,10 @@ internal class BLEScannerService : Service() {
             if (result == null) return
             val scanRecord = result.scanRecord ?: return
             val device = result.device ?: return
-            val btDevice = BluetoothDevice(
+            val btDevice = BTDevice(
                 address = device.address ?: return,
                 name = device.name ?: return,
+                rawData = scanRecord.bytes ?: return,
             )
             scope.launch {
                 _broadcast.emit(
