@@ -47,20 +47,21 @@ internal class BLEGattService : Service() {
         ) : State {
             enum class Type {
                 WAITING,
-                STARTING,
-                STOPPING,
+                TO_COMING,
+                TO_WAITING,
                 COMING,
+                STOPPING,
+            }
+
+            fun canStop(): Boolean {
+                return when (type) {
+                    Type.WAITING, Type.COMING -> true
+                    else -> false
+                }
             }
         }
         data class Connected(val address: String) : State
         object Disconnected : State
-    }
-
-    enum class Error {
-        BT_NO_ADAPTER,
-        BT_NO_PERMISSION,
-        BT_ADAPTER_DISABLED,
-        BT_NO_CONNECT_PERMISSION,
     }
 
     private val job = SupervisorJob()
@@ -213,7 +214,7 @@ internal class BLEGattService : Service() {
             if (state.type != State.Search.Type.WAITING) TODO()
             _state.value = State.Search(
                 address = state.address,
-                type = State.Search.Type.STARTING,
+                type = State.Search.Type.TO_COMING,
             )
             runCatching {
                 withContext(Dispatchers.Default) {
@@ -252,7 +253,7 @@ internal class BLEGattService : Service() {
             if (state.type != State.Search.Type.COMING) TODO()
             _state.value = State.Search(
                 address = state.address,
-                type = State.Search.Type.STOPPING,
+                type = State.Search.Type.TO_WAITING,
             )
             runCatching {
                 withContext(Dispatchers.Default) {
@@ -321,7 +322,10 @@ internal class BLEGattService : Service() {
         if (state.value != State.Disconnected) TODO("connect state: $state")
         val context: Context = this
         scope.launch {
-            _state.value = State.Connecting(address = address)
+            _state.value = State.Search(
+                address = address,
+                type = State.Search.Type.TO_COMING,
+            )
             runCatching {
                 withContext(Dispatchers.Default) {
                     scanStart(scanCallback)
@@ -388,7 +392,32 @@ internal class BLEGattService : Service() {
     */
 
     private fun onStopSearch() {
-        TODO()
+        Log.d(TAG, "search stop...")
+        val service: Service = this
+        scope.launch {
+            val state = state.value
+            if (state !is State.Search) TODO()
+            if (!state.canStop()) TODO()
+            _state.value = State.Search(
+                address = state.address,
+                type = State.Search.Type.STOPPING,
+            )
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    scanStop(scanCallback)
+                }
+            }.fold(
+                onSuccess = {
+                            // todo
+                },
+                onFailure = {
+                    _broadcast.emit(Broadcast.OnError(it))
+                },
+            )
+            _state.value = State.Disconnected
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            unregisterReceiver(receivers)
+        }
     }
 
     private fun onStartCommand(intent: Intent) {
@@ -429,6 +458,12 @@ internal class BLEGattService : Service() {
         fun disconnect(context: Context) {
             val intent = Intent(context, BLEGattService::class.java)
             intent.action = ACTION_DISCONNECT
+            context.startService(intent)
+        }
+
+        fun searchStop(context: Context) {
+            val intent = Intent(context, BLEGattService::class.java)
+            intent.action = ACTION_SEARCH_STOP
             context.startService(intent)
         }
     }

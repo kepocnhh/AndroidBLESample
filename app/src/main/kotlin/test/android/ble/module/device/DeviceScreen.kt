@@ -130,6 +130,16 @@ internal fun DeviceScreen(
                     BLEGattService.disconnect(context)
                 }
             )
+            val isSearch = gattState.let {
+                it is BLEGattService.State.Search && it.canStop()
+            }
+            Button(
+                text = "stop search",
+                enabled = isSearch,
+                onClick = {
+                    BLEGattService.searchStop(context)
+                }
+            )
             Button(
                 text = "connect",
                 enabled = gattState == BLEGattService.State.Disconnected,

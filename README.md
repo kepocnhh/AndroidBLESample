@@ -8,9 +8,16 @@ todo
 
 ### GATT
 
-1. connect
-2. start search
-3. todo
+```
+ ┌ - - - - - - - -┐
+ ↓                |
+[ ] connect       |
+ ↓                |
+[ ] search start  |
+ ├ - - - - - - → [ ] search stop
+ ↓
+[ ] todo
+```
 
 ---
 
