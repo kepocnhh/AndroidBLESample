@@ -9,14 +9,22 @@ todo
 ### GATT
 
 ```
- ┌ - - - - - - - -┐
- ↓                |
-[ ] connect       |
- ↓                |
-[ ] search start  |
- ├ - - - - - - → [ ] search stop
- ↓
-[ ] todo
+                     ┌ - - - - - - - -┐
+                     ↓                |
+disconnecting [ ]--→[ ] disconnected  |
+               |     ├ - - - - - - - -┤
+               |     ↓                |
+               |    [ ] connecting    |
+               |     ↓                |
+               |---→[ ]← - - - - - - -* - - - - - - -┐
+               |     |  search start  |              |
+               |     ├ - - - - - - → [ ] search stop |
+               |     |                ↑              |
+               |     |                ├ - - - - - - -┘
+               |     |                |
+               |     ├ - - - - - - → [ ] search waiting
+               |     ↓
+               └ - -[ ] connected
 ```
 
 ---

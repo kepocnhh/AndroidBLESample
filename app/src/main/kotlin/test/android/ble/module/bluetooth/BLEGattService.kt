@@ -2,6 +2,7 @@ package test.android.ble.module.bluetooth
 
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass.Device
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
@@ -29,6 +30,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
+import test.android.ble.util.android.requireBTAdapter
 import test.android.ble.util.android.scanStart
 import test.android.ble.util.android.scanStop
 import kotlin.time.Duration.Companion.seconds
@@ -39,7 +41,6 @@ internal class BLEGattService : Service() {
     }
 
     sealed interface State {
-        object Waiting : State
         data class Connecting(val address: String) : State
         data class Search(
             val address: String,
@@ -61,12 +62,13 @@ internal class BLEGattService : Service() {
             }
         }
         data class Connected(val address: String) : State
+        data class Disconnecting(val address: String) : State
         object Disconnected : State
     }
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Main + job)
-    private val connecteds = mutableMapOf<String, BluetoothGatt>()
+    private var gatt: BluetoothGatt? = null
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             Log.d(TAG, "on scan result: callback $callbackType result $result")
@@ -77,12 +79,15 @@ internal class BLEGattService : Service() {
                             if (result == null) return
                             val scanRecord = result.scanRecord ?: return
                             val device = result.device ?: return
-                            if (device.address == bleState.address) {
-                                // todo
-                            }
+                            if (device.address == bleState.address) onConnect()
                         }
-                        else -> TODO("onScanResult search ${bleState.type}")
+                        else -> {
+                            // noop
+                        }
                     }
+                }
+                is State.Connecting -> {
+                    // noop
                 }
                 else -> TODO("onScanResult bleState: $bleState")
             }
@@ -96,35 +101,26 @@ internal class BLEGattService : Service() {
                 BluetoothGatt.GATT_SUCCESS -> {
                     when (newState) {
                         BluetoothProfile.STATE_CONNECTED -> {
-                            connecteds[gatt.device.address] = gatt
-                            _state.value = State.Connected(address = gatt.device.address)
-                            val service: Service = this@BLEGattService
-                            val intent = Intent(service, BLEGattService::class.java)
-                            intent.action = ACTION_DISCONNECT
-                            ForegroundUtil.startForeground(
-                                service = service,
-                                title = "connected ${gatt.device.address}",
-                                action = "disconnect",
-                                intent = intent,
-                            )
-                            val filter = IntentFilter().also {
-                                it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
-                                it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+                            when (state.value) {
+                                is State.Connecting -> {
+                                    onConnectSuccess(gatt)
+                                }
+                                else -> TODO()
                             }
-                            registerReceiver(receivers, filter)
                         }
-                        /*
                         BluetoothProfile.STATE_DISCONNECTED -> {
-                            connecteds.remove(gatt.device.address)
-                            _connectState.value = ConnectState.DISCONNECTED
-                            try {
-                                gatt.close()
-                            } catch (e: Throwable) {
-                                Log.w(TAG, "Close gatt ${gatt.device.address} error: $e")
+                            when (state.value) {
+                                is State.Disconnecting -> {
+                                    try {
+                                        gatt.close()
+                                    } catch (e: Throwable) {
+                                        Log.w(TAG, "Close gatt ${gatt.device.address} error: $e")
+                                    }
+                                    _state.value = State.Disconnected
+                                }
+                                else -> TODO()
                             }
-                            Log.d(TAG, "Device ${gatt.device.address} disconnected.")
                         }
-                        */
                         else -> {
                             TODO("Gatt newState: $newState")
                         }
@@ -148,7 +144,7 @@ internal class BLEGattService : Service() {
                                 is State.Search -> {
                                     when (bleState.type) {
                                         State.Search.Type.COMING -> {
-                                            onScanStop()
+                                            onSearchWaiting()
                                         }
                                         else -> {
                                             // todo
@@ -244,8 +240,8 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onScanStop() {
-        Log.d(TAG, "scan stop...")
+    private fun onSearchWaiting() {
+        Log.d(TAG, "search waiting...")
         val service: Service = this
         scope.launch {
             val state = state.value
@@ -316,6 +312,73 @@ internal class BLEGattService : Service() {
     }
     */
 
+    private fun onConnectSuccess(gatt: BluetoothGatt) {
+        Log.d(TAG, "connect success...")
+        val state = state.value
+        if (state !is State.Connecting) TODO()
+        val service: Service = this
+        val address = state.address
+        scope.launch {
+            runCatching {
+                scanStop(scanCallback)
+            }.fold(
+                onSuccess = {
+                    this@BLEGattService.gatt = gatt
+                    val intent = Intent(service, BLEGattService::class.java)
+                    intent.action = ACTION_DISCONNECT
+                    ForegroundUtil.startForeground(
+                        service = service,
+                        title = "connected $address",
+                        action = "disconnect",
+                        intent = intent,
+                    )
+                    _state.value = State.Connected(address = address)
+                    unregisterReceiver(receivers)
+                },
+                onFailure = {
+                            TODO()
+                },
+            )
+        }
+    }
+
+    private fun onConnect() {
+        Log.d(TAG, "connect device...")
+        val state = state.value
+        if (state is State.Connecting) return
+        if (state !is State.Search) TODO()
+        if (state.type != State.Search.Type.COMING) TODO()
+        val address = state.address
+        _state.value = State.Connecting(address = address)
+        val service: Service = this
+        scope.launch {
+            ForegroundUtil.startForeground(
+                service = service,
+                title = "connecting $address...",
+            )
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    val autoConnect = false
+                    requireBTAdapter()
+                        .getRemoteDevice(address)
+                        .connectGatt(service, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                }
+            }.fold(
+                onSuccess = {
+                            // todo
+                },
+                onFailure = {
+                    _broadcast.emit(Broadcast.OnError(it))
+                    _state.value = State.Search(
+                        address = address,
+                        type = State.Search.Type.WAITING,
+                    )
+                    onScanStart()
+                },
+            )
+        }
+    }
+
     private fun onConnect(address: String) {
         Log.d(TAG, "connect $address...")
         val service: Service = this
@@ -358,38 +421,38 @@ internal class BLEGattService : Service() {
         }
     }
 
-    /*
     private fun onDisconnect() {
         Log.d(TAG, "disconnect...")
-        if (connectState.value != ConnectState.CONNECTED) TODO("connect state: ${connectState.value}")
+        val state = state.value
+        if (state !is State.Connected) TODO("connect state: $state")
+        val address = state.address
+        val service: Service = this
+        _state.value = State.Disconnecting(address = address)
+        ForegroundUtil.startForeground(
+            service = service,
+            title = "disconnecting $address...",
+        )
         scope.launch {
-            _connectState.value = ConnectState.NONE
-            val gatt = connecteds.values.single()
             runCatching {
+                val gatt = checkNotNull(gatt)
                 withContext(Dispatchers.Default) {
-//                    withTimeout(10.seconds) {
-//                        Thread.sleep(15000) // todo
-//                    }
                     // todo timeout
                     gatt.disconnect()
                 }
-                gatt
             }.fold(
                 onSuccess = {
-                    Log.d(TAG, "Device ${it.device.address} disconnecting...")
+                    Log.d(TAG, "Device $address disconnected.")
                     // todo bt on/off
                 },
                 onFailure = {
-                    connecteds.remove(gatt.device.address)
-                    val error = (it as? BLEGattException)?.error
-                    _broadcast.emit(Broadcast.OnError(error))
-                    _connectState.value = ConnectState.DISCONNECTED
+                    _broadcast.emit(Broadcast.OnError(it))
+                    _state.value = State.Disconnected
                 }
             )
+            gatt = null
             stopForeground(STOP_FOREGROUND_REMOVE)
         }
     }
-    */
 
     private fun onStopSearch() {
         Log.d(TAG, "search stop...")
@@ -424,7 +487,7 @@ internal class BLEGattService : Service() {
         when (intent.action) {
             ACTION_CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
             ACTION_SEARCH_STOP -> onStopSearch()
-//            ACTION_DISCONNECT -> onDisconnect()
+            ACTION_DISCONNECT -> onDisconnect()
         }
     }
 

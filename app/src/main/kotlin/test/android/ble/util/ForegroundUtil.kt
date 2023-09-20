@@ -1,5 +1,6 @@
 package test.android.ble.util
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -16,32 +17,55 @@ internal object ForegroundUtil {
     private const val CHANNEL_NAME = "BLE Sample"
     private val NOTIFICATION_ID = System.currentTimeMillis().toInt().absoluteValue
 
+    private fun Service.startForeground(notification: Notification) {
+        notify(notification)
+        startForeground(NOTIFICATION_ID, notification)
+    }
+
+    private fun Context.notify(notification: Notification) {
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.checkChannel()
+        notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun Context.builder(title: String): NotificationCompat.Builder {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setSmallIcon(R.drawable.bt)
+    }
+
+    private fun NotificationManager.checkChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel: NotificationChannel? = getNotificationChannel(CHANNEL_ID)
+        if (channel == null) {
+            createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_HIGH,
+                ),
+            )
+        }
+    }
+
+    internal fun startForeground(
+        service: Service,
+        title: String,
+    ) {
+        service.startForeground(service.builder(title).build())
+    }
+
     private fun startForeground(
         service: Service,
         title: String,
         action: String,
         intent: PendingIntent,
     ) {
-        val notificationManager = service.getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel: NotificationChannel? = notificationManager.getNotificationChannel(CHANNEL_ID)
-            if (channel == null) {
-                notificationManager.createNotificationChannel(
-                    NotificationChannel(
-                        CHANNEL_ID,
-                        CHANNEL_NAME,
-                        NotificationManager.IMPORTANCE_HIGH,
-                    ),
-                )
-            }
-        }
-        val notification = NotificationCompat.Builder(service, CHANNEL_ID)
-            .setContentTitle(title)
-            .setSmallIcon(R.drawable.bt)
+        val notification = service
+            .builder(title)
             .addAction(-1, action, intent)
             .build()
-        notificationManager.notify(NOTIFICATION_ID, notification)
-        service.startForeground(NOTIFICATION_ID, notification)
+        service.startForeground(notification)
     }
 
     fun startForeground(
