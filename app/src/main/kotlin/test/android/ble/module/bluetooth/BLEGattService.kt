@@ -116,7 +116,13 @@ internal class BLEGattService : Service() {
                                     } catch (e: Throwable) {
                                         Log.w(TAG, "Close gatt ${gatt.device.address} error: $e")
                                     }
+                                    this@BLEGattService.gatt = null
                                     _state.value = State.Disconnected
+                                    stopForeground(STOP_FOREGROUND_REMOVE)
+                                    unregisterReceiver(receivers)
+                                }
+                                is State.Connected -> {
+                                    onDisconnectConnected()
                                 }
                                 else -> TODO()
                             }
@@ -135,6 +141,17 @@ internal class BLEGattService : Service() {
     private val receivers = object : BroadcastReceiver() {
         private fun onReceive(intent: Intent) {
             when (intent.action) {
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                    Log.d(TAG, "Bluetooth device state: ACTION_ACL_DISCONNECTED device ${device.address}")
+                    when (val state = state.value) {
+                        is State.Connected -> {
+                            if (device.address != state.address) TODO()
+                            onDisconnectConnected()
+                        }
+                        else -> TODO()
+                    }
+                }
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                     Log.d(TAG, "Bluetooth adapter state: $state")
@@ -199,6 +216,22 @@ internal class BLEGattService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent != null) onReceive(intent)
         }
+    }
+
+    private fun onDisconnectConnected() {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        val oldGatt = checkNotNull(gatt)
+        try {
+            oldGatt.close()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Close gatt ${oldGatt.device.address} error: $e")
+        }
+        gatt = null
+        _state.value = State.Search(
+            address = oldGatt.device.address,
+            type = State.Search.Type.WAITING,
+        )
+        onScanStart()
     }
 
     private fun onScanStart() {
@@ -333,7 +366,6 @@ internal class BLEGattService : Service() {
                         intent = intent,
                     )
                     _state.value = State.Connected(address = address)
-                    unregisterReceiver(receivers)
                 },
                 onFailure = {
                             TODO()
@@ -379,6 +411,15 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun registerReceivers() {
+        val filter = IntentFilter().also {
+            it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+            it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+        }
+        registerReceiver(receivers, filter)
+    }
+
     private fun onConnect(address: String) {
         Log.d(TAG, "connect $address...")
         val service: Service = this
@@ -403,15 +444,11 @@ internal class BLEGattService : Service() {
                         action = "stop",
                         intent = intent,
                     )
-                    val filter = IntentFilter().also {
-                        it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
-                        it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
-                    }
                     _state.value = State.Search(
                         address = address,
                         type = State.Search.Type.COMING,
                     )
-                    registerReceiver(receivers, filter)
+                    registerReceivers()
                 },
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
@@ -441,16 +478,15 @@ internal class BLEGattService : Service() {
                 }
             }.fold(
                 onSuccess = {
-                    Log.d(TAG, "Device $address disconnected.")
-                    // todo bt on/off
+                    // todo
                 },
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
                     _state.value = State.Disconnected
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    unregisterReceiver(receivers)
                 }
             )
-            gatt = null
-            stopForeground(STOP_FOREGROUND_REMOVE)
         }
     }
 
@@ -479,7 +515,6 @@ internal class BLEGattService : Service() {
             )
             _state.value = State.Disconnected
             stopForeground(STOP_FOREGROUND_REMOVE)
-            unregisterReceiver(receivers)
         }
     }
 
