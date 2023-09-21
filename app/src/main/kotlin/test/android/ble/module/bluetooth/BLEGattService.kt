@@ -92,6 +92,9 @@ internal class BLEGattService : Service() {
                 is State.Connecting -> {
                     // noop
                 }
+                is State.Connected -> {
+                    if (bleState.address != result?.device?.address) TODO()
+                }
                 else -> TODO("onScanResult bleState: $bleState")
             }
         }
@@ -152,7 +155,10 @@ internal class BLEGattService : Service() {
                             if (device.address != state.address) TODO()
                             onDisconnectConnected()
                         }
-                        else -> TODO()
+                        is State.Search -> {
+                            // noop
+                        }
+                        else -> TODO("${intent.action} state $state")
                     }
                 }
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
