@@ -9,6 +9,10 @@ internal class LocException(val error: Error) : Exception() {
     }
 }
 
+internal fun Context.isLocationEnabled(provider: String = LocationManager.GPS_PROVIDER): Boolean {
+    return getSystemService(LocationManager::class.java).isProviderEnabled(provider)
+}
+
 internal fun Context.checkProvider(provider: String = LocationManager.GPS_PROVIDER) {
     if (!getSystemService(LocationManager::class.java).isProviderEnabled(provider)) {
         throw LocException(LocException.Error.DISABLED)
