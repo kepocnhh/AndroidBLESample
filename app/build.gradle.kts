@@ -18,7 +18,7 @@ android {
         applicationId = appId
         minSdk = Version.Android.minSdk
         targetSdk = Version.Android.targetSdk
-        versionCode = 4
+        versionCode = 5
         versionName = "0.0.$versionCode"
         manifestPlaceholders["appName"] = "@string/app_name"
     }
@@ -72,6 +72,8 @@ androidComponents.onVariants { variant ->
                     "$applicationId.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
                     "android.permission.BLUETOOTH",
                     "android.permission.BLUETOOTH_ADMIN",
+                    "android.permission.BLUETOOTH_CONNECT",
+                    "android.permission.BLUETOOTH_SCAN",
                     "android.permission.ACCESS_BACKGROUND_LOCATION",
                     "android.permission.ACCESS_COARSE_LOCATION",
                     "android.permission.ACCESS_FINE_LOCATION",

@@ -53,7 +53,7 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                         is BTException -> {
                             when (broadcast.error.error) {
                                 BTException.Error.NO_ADAPTER -> context.showToast("No adapter!")
-                                BTException.Error.NO_PERMISSION -> context.showToast("No permission!")
+                                BTException.Error.NO_PERMISSION -> context.showToast("No BT permission!")
                                 BTException.Error.DISABLED -> context.showToast("Adapter disabled!")
                             }
                         }
