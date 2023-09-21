@@ -10,17 +10,17 @@ todo
 
 ```
 a] disconnected
-b] search start
-c] search waiting
+b] search waiting
+c] search coming
 d] connected
 ```
 
 ```
 ┌--→[a]←-------┐
 |    |         |
-|    ├-----┐   |
-|    ↓     ↓   |
-|---[b]←--[c]--┘
+|    └-----┐   |
+|          ↓   |
+├---[c]←--[b]--┘
 |    |     ↑
 |    ├-----┤
 |    ↓     |

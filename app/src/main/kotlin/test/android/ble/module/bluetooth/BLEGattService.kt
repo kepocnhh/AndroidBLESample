@@ -30,6 +30,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
+import test.android.ble.util.android.BTException
+import test.android.ble.util.android.LocException
 import test.android.ble.util.android.isBTEnabled
 import test.android.ble.util.android.isLocationEnabled
 import test.android.ble.util.android.onBTEnabled
@@ -304,9 +306,11 @@ internal class BLEGattService : Service() {
         fromWaiting()
     }
 
-    private suspend fun toComing(state: State.Search) {
-        val service: Service = this
+    private suspend fun toComing() {
+        val state = state.value
+        if (state !is State.Search) TODO()
         if (state.type != State.Search.Type.WAITING) TODO()
+        val service: Service = this
         _state.value = State.Search(
             address = state.address,
             type = State.Search.Type.TO_COMING,
@@ -345,7 +349,7 @@ internal class BLEGattService : Service() {
             if (state !is State.Search) TODO()
             if (state.type != State.Search.Type.WAITING) TODO()
             if (runCatching { isBTEnabled() }.getOrDefault(false) && isLocationEnabled()) {
-                toComing(state)
+                toComing()
             } else {
                 startForegroundWaiting()
             }
@@ -379,11 +383,11 @@ internal class BLEGattService : Service() {
                 }
             }.fold(
                 onSuccess = {
-                    startForegroundWaiting()
                     _state.value = State.Search(
                         address = state.address,
                         type = State.Search.Type.WAITING,
                     )
+                    startForegroundWaiting()
                 },
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
@@ -504,33 +508,22 @@ internal class BLEGattService : Service() {
 
     private fun onConnect(address: String) {
         Log.d(TAG, "connect $address...")
-        val service: Service = this
         if (state.value != State.Disconnected) TODO("connect state: $state")
-        val context: Context = this
         scope.launch {
-            _state.value = State.Search(
-                address = address,
-                type = State.Search.Type.TO_COMING,
-            )
             runCatching {
                 withContext(Dispatchers.Default) {
-                    scanStart(scanCallback)
+                    if (!isBTEnabled()) throw BTException(BTException.Error.DISABLED)
+                    if (!isLocationEnabled()) throw LocException(LocException.Error.DISABLED)
                 }
             }.fold(
                 onSuccess = {
-                    val intent = Intent(service, BLEGattService::class.java)
-                    intent.action = ACTION_SEARCH_STOP
-                    ForegroundUtil.startForeground(
-                        service = service,
-                        title = "searching $address...",
-                        action = "stop",
-                        intent = intent,
-                    )
+                    registerReceivers()
                     _state.value = State.Search(
                         address = address,
-                        type = State.Search.Type.COMING,
+                        type = State.Search.Type.WAITING,
                     )
-                    registerReceivers()
+                    startForegroundWaiting()
+                    toComing()
                 },
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
