@@ -30,6 +30,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
+import test.android.ble.util.android.isBTEnabled
+import test.android.ble.util.android.onBTEnabled
 import test.android.ble.util.android.requireBTAdapter
 import test.android.ble.util.android.scanStart
 import test.android.ble.util.android.scanStop
@@ -122,7 +124,8 @@ internal class BLEGattService : Service() {
                                     unregisterReceiver(receivers)
                                 }
                                 is State.Connected -> {
-                                    onDisconnectConnected()
+                                    val scanStart = runCatching { isBTEnabled() }.getOrDefault(false)
+                                    onDisconnectConnected(scanStart = scanStart)
                                 }
                                 else -> TODO()
                             }
@@ -147,7 +150,7 @@ internal class BLEGattService : Service() {
                     when (val state = state.value) {
                         is State.Connected -> {
                             if (device.address != state.address) TODO()
-                            onDisconnectConnected()
+                            onDisconnectConnected(scanStart = true)
                         }
                         else -> TODO()
                     }
@@ -167,6 +170,9 @@ internal class BLEGattService : Service() {
                                             // todo
                                         }
                                     }
+                                }
+                                is State.Connected -> {
+                                    onDisconnectConnected(scanStart = false)
                                 }
                                 else -> {
                                     // todo
@@ -218,7 +224,7 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onDisconnectConnected() {
+    private fun onDisconnectConnected(scanStart: Boolean) {
         stopForeground(STOP_FOREGROUND_REMOVE)
         val oldGatt = checkNotNull(gatt)
         try {
@@ -231,7 +237,7 @@ internal class BLEGattService : Service() {
             address = oldGatt.device.address,
             type = State.Search.Type.WAITING,
         )
-        onScanStart()
+        if (scanStart) onScanStart()
     }
 
     private fun onScanStart() {
