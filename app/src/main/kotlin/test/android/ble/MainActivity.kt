@@ -88,15 +88,12 @@ internal class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.d(TAG, "on create...")
         super.onCreate(savedInstanceState)
-        val context: Context = this
         setContent {
             Log.d(TAG, "composition...")
             BackHandler(onBack = ::finish)
             Log.d(TAG, "Build.VERSION.SDK_INT: ${Build.VERSION.SDK_INT}")
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 val permissions = arrayOf(
-//                    Manifest.permission.BLUETOOTH,
-//                    Manifest.permission.BLUETOOTH_ADMIN,
                     Manifest.permission.ACCESS_COARSE_LOCATION,
                     Manifest.permission.ACCESS_FINE_LOCATION,
                 )
@@ -105,8 +102,6 @@ internal class MainActivity : AppCompatActivity() {
                 }
             } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
                 val permissions = arrayOf(
-                    Manifest.permission.BLUETOOTH,
-                    Manifest.permission.BLUETOOTH_ADMIN,
                     Manifest.permission.ACCESS_COARSE_LOCATION,
                     Manifest.permission.ACCESS_FINE_LOCATION,
                     Manifest.permission.ACCESS_BACKGROUND_LOCATION,
@@ -114,23 +109,23 @@ internal class MainActivity : AppCompatActivity() {
                 GrantedOrFinish(permissions) {
                     RouterScreen()
                 }
-            } else {
-                // Build.VERSION.SDK_INT > Build.VERSION_CODES.Q
+            } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.R) {
                 val permissions = arrayOf(
-//                    Manifest.permission.BLUETOOTH,
-//                    Manifest.permission.BLUETOOTH_ADMIN,
                     Manifest.permission.ACCESS_COARSE_LOCATION,
                     Manifest.permission.ACCESS_FINE_LOCATION,
                 )
-                if (!isAllGranted(permissions)) {
-                    Log.d(TAG, permissions.associateWith { isGranted(it) }.toString())
-                    if (permissionsRequester.collectAsState().isAllRequested(permissions)) {
-                        showToast("No ${permissions.notGranted(context)} permissions!")
-                        finish()
-                    } else {
-                        permissionsRequester.request(permissions)
-                    }
-                } else {
+                GrantedOrFinish(permissions) {
+                    LocationGranted()
+                }
+            } else {
+                // Build.VERSION.SDK_INT > Build.VERSION_CODES.R
+                val permissions = arrayOf(
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                    Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                )
+                GrantedOrFinish(permissions) {
                     LocationGranted()
                 }
             }

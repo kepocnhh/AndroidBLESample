@@ -72,6 +72,8 @@ androidComponents.onVariants { variant ->
                     "$applicationId.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
                     "android.permission.BLUETOOTH",
                     "android.permission.BLUETOOTH_ADMIN",
+                    "android.permission.BLUETOOTH_CONNECT",
+                    "android.permission.BLUETOOTH_SCAN",
                     "android.permission.ACCESS_BACKGROUND_LOCATION",
                     "android.permission.ACCESS_COARSE_LOCATION",
                     "android.permission.ACCESS_FINE_LOCATION",
