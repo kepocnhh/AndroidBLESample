@@ -13,13 +13,16 @@ a] disconnected
 b] search start
 c] search waiting
 d] connected
+```
 
+```
 ┌--→[a]←-------┐
 |    |         |
 |    ├-----┐   |
 |    ↓     ↓   |
 |---[b]←--[c]--┘
 |    |     ↑
+|    ├-----┤
 |    ↓     |
 └---[d]----┘
 ```
