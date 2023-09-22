@@ -689,7 +689,7 @@ internal class BLEGattService : Service() {
         characteristic: UUID,
         bytes: ByteArray,
     ) {
-        Log.d(TAG, "on write characteristic ${bytes.toList()}...")
+        Log.d(TAG, "on write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
         if (state !is State.Connected) TODO("connect state: $state")
         _state.value = state.copy(type = State.Connected.Type.WRITING)

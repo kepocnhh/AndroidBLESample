@@ -123,16 +123,16 @@ internal fun DeviceScreen(
     val TAG = "[Device|Screen]"
     val context = LocalContext.current
     val insets = LocalView.current.rootWindowInsets.toPaddings()
-//    val gattState = BLEGattService.state.collectAsState().value
-    val gattState: BLEGattService.State = BLEGattService.State.Connected(
-        address = address,
-        type = BLEGattService.State.Connected.Type.READY,
-        services = mapOf(
-            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
-                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
-            ),
-        )
-    )
+    val gattState = BLEGattService.state.collectAsState().value
+//    val gattState: BLEGattService.State = BLEGattService.State.Connected(
+//        address = address,
+//        type = BLEGattService.State.Connected.Type.READY,
+//        services = mapOf(
+//            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
+//                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
+//            ),
+//        )
+//    )
     val selectServiceDialogState = remember { mutableStateOf(false) }
     val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
@@ -240,7 +240,7 @@ internal fun DeviceScreen(
                                 String.format("%03d", it.toInt() and 0xFF)
                             }
                         }
-                                                                 }, // todo
+                    }, // todo
                     style = TextStyle(
                         fontSize = 14.sp,
                     ),
@@ -250,7 +250,13 @@ internal fun DeviceScreen(
                         .height(48.dp)
                         .fillMaxWidth()
                         .onClick(enabled = parsedBytes != null) {
-                                                                // todo
+                            selectedCharacteristicState.value = null
+                            BLEGattService.writeCharacteristic(
+                                context = context,
+                                service = service,
+                                characteristic = characteristic,
+                                bytes = checkNotNull(parsedBytes),
+                            )
                         }
                         .wrapContentSize(),
                     text = if (parsedBytes == null) "error" else { "write ${parsedBytes.size} bytes" },
