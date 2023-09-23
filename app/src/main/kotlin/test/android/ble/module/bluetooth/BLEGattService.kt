@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -17,7 +18,6 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import androidx.lifecycle.flowWithLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +34,7 @@ import test.android.ble.util.android.BTException
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.isBTEnabled
 import test.android.ble.util.android.isLocationEnabled
+import test.android.ble.util.android.removeBond
 import test.android.ble.util.android.requireBTAdapter
 import test.android.ble.util.android.scanStart
 import test.android.ble.util.android.scanStop
@@ -88,6 +89,7 @@ internal class BLEGattService : Service() {
                 READY,
                 WRITING,
                 PAIRING,
+                UNPAIRING,
             }
         }
         data class Disconnecting(val address: String) : State
@@ -319,9 +321,15 @@ internal class BLEGattService : Service() {
                         BluetoothDevice.BOND_BONDING -> {
                             Log.d(TAG, "bonding...")
                         }
-                        else -> {
-                            TODO("State $newState unsupported!")
+                        BluetoothDevice.BOND_NONE -> {
+                            when (oldState) {
+                                BluetoothDevice.BOND_BONDING -> {
+                                    _state.value = state.copy(type = State.Connected.Type.READY, isPaired = false)
+                                }
+                                else -> TODO("State $oldState -> $newState unsupported!")
+                            }
                         }
+                        else -> TODO("State $newState unsupported!")
                     }
                 }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
@@ -748,6 +756,30 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onUnpair() {
+        Log.d(TAG, "on unpair...")
+        val state = state.value
+        if (state !is State.Connected) TODO("unpair state: $state")
+        if (state.type != State.Connected.Type.READY) TODO("unpair state.type: ${state.type}")
+        if (!state.isPaired) TODO("Already unpaired!")
+        _state.value = state.copy(type = State.Connected.Type.UNPAIRING)
+        val gatt = checkNotNull(gatt)
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    if (!gatt.device.removeBond()) TODO("Remove bond error!")
+                }
+            }.fold(
+                onSuccess = {
+                    // todo
+                },
+                onFailure = {
+                    TODO("GATT unpair error: $it!")
+                },
+            )
+        }
+    }
+
     private fun onStartCommand(intent: Intent) {
         when (intent.action) {
             ACTION_CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
@@ -768,6 +800,7 @@ internal class BLEGattService : Service() {
                 )
             }
             ACTION_PAIR -> onPair()
+            ACTION_UNPAIR -> onUnpair()
             else -> TODO("Unknown action: ${intent.action}!")
         }
     }
@@ -835,6 +868,7 @@ internal class BLEGattService : Service() {
         private val ACTION_SEARCH_STOP = "${this::class.java.name}:ACTION_SEARCH_STOP"
         private val ACTION_WRITE_CHARACTERISTIC = "${this::class.java.name}:ACTION_WRITE_CHARACTERISTIC"
         private val ACTION_PAIR = "${this::class.java.name}:ACTION_PAIR"
+        private val ACTION_UNPAIR = "${this::class.java.name}:ACTION_UNPAIR"
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
         @JvmStatic
@@ -881,6 +915,12 @@ internal class BLEGattService : Service() {
         fun pair(context: Context) {
             val intent = Intent(context, BLEGattService::class.java)
             intent.action = ACTION_PAIR
+            context.startService(intent)
+        }
+
+        fun unpair(context: Context) {
+            val intent = Intent(context, BLEGattService::class.java)
+            intent.action = ACTION_UNPAIR
             context.startService(intent)
         }
     }

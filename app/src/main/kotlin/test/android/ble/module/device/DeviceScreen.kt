@@ -385,12 +385,17 @@ internal fun DeviceScreen(
                             clearWritesDialogState.value = true
                         },
                     )
+                    val pairText = when (gattState.type) {
+                        BLEGattService.State.Connected.Type.PAIRING -> "pairing..."
+                        BLEGattService.State.Connected.Type.UNPAIRING -> "unpairing..."
+                        else -> if (gattState.isPaired) "unpair" else "pair"
+                    }
                     Button(
-                        text = if (gattState.isPaired) "unpair" else "pair",
+                        text = pairText,
                         enabled = isReady,
                         onClick = {
                             if (gattState.isPaired) {
-                                // todo unpair
+                                BLEGattService.unpair(context)
                             } else {
                                 BLEGattService.pair(context)
                             }
