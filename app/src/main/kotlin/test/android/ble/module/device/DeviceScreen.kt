@@ -372,45 +372,82 @@ internal fun DeviceScreen(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth(),
         ) {
-            Button(
-                text = "write characteristic",
-                enabled = gattState is BLEGattService.State.Connected && gattState.type == BLEGattService.State.Connected.Type.READY,
-                onClick = {
-                    selectServiceDialogState.value = true
-                },
-                onLongClick = {
-                    clearWritesDialogState.value = true
-                },
-            )
-            Button(
-                text = "disconnect",
-                enabled = gattState is BLEGattService.State.Connected,
-                onClick = {
-                    BLEGattService.disconnect(context)
-                },
-            )
-            val isSearch = gattState.let {
-                it is BLEGattService.State.Search && it.canStop()
+            when (gattState) {
+                is BLEGattService.State.Connected -> {
+                    val isReady = gattState.type == BLEGattService.State.Connected.Type.READY
+                    Button(
+                        text = "write characteristic",
+                        enabled = isReady && gattState.isPaired,
+                        onClick = {
+                            selectServiceDialogState.value = true
+                        },
+                        onLongClick = {
+                            clearWritesDialogState.value = true
+                        },
+                    )
+                    Button(
+                        text = if (gattState.isPaired) "unpair" else "pair",
+                        enabled = isReady,
+                        onClick = {
+                            if (gattState.isPaired) {
+                                // todo unpair
+                            } else {
+                                BLEGattService.pair(context)
+                            }
+                        },
+                    )
+                    Button(
+                        text = "disconnect",
+                        enabled = true,
+                        onClick = {
+                            BLEGattService.disconnect(context)
+                        },
+                    )
+                }
+                BLEGattService.State.Disconnected -> {
+                    Button(
+                        text = "connect",
+                        enabled = gattState == BLEGattService.State.Disconnected,
+                        onClick = {
+                            BLEGattService.connect(context, address = address)
+                        },
+                    )
+                    Button(
+                        text = "forget",
+                        enabled = gattState == BLEGattService.State.Disconnected,
+                        onClick = onForget
+                    )
+                }
+                is BLEGattService.State.Search -> {
+                    Button(
+                        text = "stop search",
+                        enabled = gattState.canStop(),
+                        onClick = {
+                            BLEGattService.searchStop(context)
+                        },
+                    )
+                }
+                is BLEGattService.State.Connecting -> {
+                    BasicText(
+                        modifier = Modifier
+                            .height(48.dp)
+                            .fillMaxWidth()
+                            .wrapContentSize(),
+                        text = "connecting...",
+                        style = TextStyle(color = Color.Gray),
+                    )
+                }
+                is BLEGattService.State.Disconnecting -> {
+                    BasicText(
+                        modifier = Modifier
+                            .height(48.dp)
+                            .fillMaxWidth()
+                            .wrapContentSize(),
+                        text = "disconnecting...",
+                        style = TextStyle(color = Color.Gray),
+                    )
+                }
             }
-            Button(
-                text = "stop search",
-                enabled = isSearch,
-                onClick = {
-                    BLEGattService.searchStop(context)
-                },
-            )
-            Button(
-                text = "connect",
-                enabled = gattState == BLEGattService.State.Disconnected,
-                onClick = {
-                    BLEGattService.connect(context, address = address)
-                },
-            )
-            Button(
-                text = "forget",
-                enabled = gattState == BLEGattService.State.Disconnected,
-                onClick = onForget
-            )
         }
     }
 }

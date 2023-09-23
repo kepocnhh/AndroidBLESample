@@ -17,6 +17,7 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.lifecycle.flowWithLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +25,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import test.android.ble.util.ForegroundUtil
@@ -77,12 +80,14 @@ internal class BLEGattService : Service() {
         }
         data class Connected(
             val address: String,
+            val isPaired: Boolean,
             val type: Type,
             val services: Map<UUID, Set<UUID>>,
         ) : State {
             enum class Type {
                 READY,
                 WRITING,
+                PAIRING,
             }
         }
         data class Disconnecting(val address: String) : State
@@ -294,6 +299,27 @@ internal class BLEGattService : Service() {
             if (intent != null) onReceive(intent)
         }
     }
+    private val receiversConnected = object : BroadcastReceiver() {
+        private fun onReceive(intent: Intent) {
+            when (intent.action) {
+                BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
+                    TODO()
+                }
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                    Log.d(TAG, "Bluetooth device state: ACTION_ACL_DISCONNECTED device ${device.address}")
+                    onBTDeviceDisconnected(device)
+                }
+                else -> {
+                    // noop
+                }
+            }
+        }
+
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent != null) onReceive(intent)
+        }
+    }
 
     private fun onCharacteristicWrite(characteristic: BluetoothGattCharacteristic) {
         val state = state.value
@@ -327,10 +353,11 @@ internal class BLEGattService : Service() {
         )
         _state.value = State.Connected(
             address = state.address,
+            isPaired = gatt.device.bondState == BluetoothDevice.BOND_BONDED,
             type = State.Connected.Type.READY,
             services = gatt.services.associate { gs ->
                 gs.uuid to gs.characteristics.map { it.uuid }.toSet()
-            }
+            },
         )
     }
 
@@ -371,7 +398,6 @@ internal class BLEGattService : Service() {
     }
 
     private fun disconnect() {
-        stopForeground(STOP_FOREGROUND_REMOVE)
         _state.value = State.Disconnected
         val oldGatt = checkNotNull(gatt)
         try {
@@ -380,7 +406,6 @@ internal class BLEGattService : Service() {
             Log.w(TAG, "Close gatt ${oldGatt.device.address} error: $e")
         }
         gatt = null
-        unregisterReceiver(receivers)
     }
 
     private fun onDisconnectToSearch() {
@@ -433,7 +458,6 @@ internal class BLEGattService : Service() {
             onFailure = {
                 _broadcast.emit(Broadcast.OnError(it))
                 _state.value = State.Disconnected
-                unregisterReceiver(receivers)
             },
         )
     }
@@ -488,7 +512,6 @@ internal class BLEGattService : Service() {
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
                     _state.value = State.Disconnected
-                    unregisterReceiver(receivers)
                 },
             )
         }
@@ -584,15 +607,6 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun registerReceivers() {
-        val filter = IntentFilter().also {
-            it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
-            it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
-            it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
-        }
-        registerReceiver(receivers, filter)
-    }
-
     private fun onConnect(address: String) {
         Log.d(TAG, "connect $address...")
         if (state.value != State.Disconnected) TODO("connect state: $state")
@@ -604,7 +618,6 @@ internal class BLEGattService : Service() {
                 }
             }.fold(
                 onSuccess = {
-                    registerReceivers()
                     _state.value = State.Search(
                         address = address,
                         type = State.Search.Type.WAITING,
@@ -645,8 +658,6 @@ internal class BLEGattService : Service() {
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
                     _state.value = State.Disconnected
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    unregisterReceiver(receivers)
                 }
             )
         }
@@ -676,7 +687,6 @@ internal class BLEGattService : Service() {
                 },
             )
             _state.value = State.Disconnected
-            stopForeground(STOP_FOREGROUND_REMOVE)
         }
     }
 
@@ -728,6 +738,29 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onPair() {
+        Log.d(TAG, "on pair...")
+        val state = state.value
+        if (state !is State.Connected) TODO("pair state: $state")
+        if (state.type != State.Connected.Type.READY) TODO("pair state.type: ${state.type}")
+        if (state.isPaired) TODO("Already paired!")
+        _state.value = state.copy(type = State.Connected.Type.PAIRING)
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    TODO()
+                }
+            }.fold(
+                onSuccess = {
+                    // todo
+                },
+                onFailure = {
+                    TODO("GATT pair error: $it!")
+                },
+            )
+        }
+    }
+
     private fun onStartCommand(intent: Intent) {
         when (intent.action) {
             ACTION_CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
@@ -747,6 +780,7 @@ internal class BLEGattService : Service() {
                     bytes = bytes,
                 )
             }
+            ACTION_PAIR -> onPair()
             else -> TODO("Unknown action: ${intent.action}!")
         }
     }
@@ -766,10 +800,12 @@ internal class BLEGattService : Service() {
         private val ACTION_DISCONNECT = "${this::class.java.name}:ACTION_DISCONNECT"
         private val ACTION_SEARCH_STOP = "${this::class.java.name}:ACTION_SEARCH_STOP"
         private val ACTION_WRITE_CHARACTERISTIC = "${this::class.java.name}:ACTION_WRITE_CHARACTERISTIC"
+        private val ACTION_PAIR = "${this::class.java.name}:ACTION_PAIR"
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
         @JvmStatic
         val broadcast = _broadcast.asSharedFlow()
+        private var oldState: State = State.Disconnected
         private val _state = MutableStateFlow<State>(State.Disconnected)
         @JvmStatic
         val state = _state.asStateFlow()
@@ -807,11 +843,53 @@ internal class BLEGattService : Service() {
             intent.putExtra("bytes", bytes)
             context.startService(intent)
         }
+
+        fun pair(context: Context) {
+            val intent = Intent(context, BLEGattService::class.java)
+            intent.action = ACTION_PAIR
+            context.startService(intent)
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "on create[${hashCode()}]...") // todo
+        state
+            .onEach { newState ->
+                onNewState(oldState, newState)
+                oldState = newState
+            }
+            .launchIn(scope)
+    }
+
+    private fun onNewState(oldState: State, newState: State) {
+        if (oldState is State.Connected) {
+            if (newState !is State.Connected) {
+                unregisterReceiver(receiversConnected)
+            }
+        } else {
+            if (newState is State.Connected) {
+                val filter = IntentFilter().also {
+                    it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                    it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+                }
+                registerReceiver(receiversConnected, filter)
+            }
+        }
+        if (oldState is State.Disconnected) {
+            if (newState !is State.Disconnected) {
+                val filter = IntentFilter().also {
+                    it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                    it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+                }
+                registerReceiver(receivers, filter)
+            }
+        } else {
+            if (newState is State.Disconnected) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                unregisterReceiver(receivers)
+            }
+        }
     }
 
     override fun onDestroy() {
