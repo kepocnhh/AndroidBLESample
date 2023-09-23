@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -26,8 +27,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,11 +38,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import sp.ax.jc.clicks.onClick
+import test.android.ble.App
 import test.android.ble.module.bluetooth.BLEGattService
 import test.android.ble.util.android.BLEException
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.showToast
+import test.android.ble.util.compose.AutoCompleteTextField
 import test.android.ble.util.compose.toPaddings
 import java.math.BigInteger
 import java.util.UUID
@@ -123,16 +128,19 @@ internal fun DeviceScreen(
     val TAG = "[Device|Screen]"
     val context = LocalContext.current
     val insets = LocalView.current.rootWindowInsets.toPaddings()
-    val gattState = BLEGattService.state.collectAsState().value
-//    val gattState: BLEGattService.State = BLEGattService.State.Connected(
-//        address = address,
-//        type = BLEGattService.State.Connected.Type.READY,
-//        services = mapOf(
-//            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
-//                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
-//            ),
-//        )
-//    )
+    val viewModel = App.viewModel<DeviceViewModel>()
+    val writes by viewModel.writes.collectAsState()
+    if (writes == null) viewModel.requestWrites()
+//    val gattState = BLEGattService.state.collectAsState().value
+    val gattState: BLEGattService.State = BLEGattService.State.Connected(
+        address = address,
+        type = BLEGattService.State.Connected.Type.READY,
+        services = mapOf(
+            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
+                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
+            ),
+        )
+    )
     val selectServiceDialogState = remember { mutableStateOf(false) }
     val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
@@ -206,26 +214,26 @@ internal fun DeviceScreen(
                     overflow = TextOverflow.Ellipsis,
                     text = "Characteristic: $characteristic",
                 )
-                Spacer(modifier = Modifier.height(1.dp).fillMaxWidth().background(Color.Black))
-                val stringBytesState = remember { mutableStateOf("") }
-                BasicTextField(
-                    modifier = Modifier
-                        .height(48.dp)
-                        .fillMaxWidth()
-                        .wrapContentHeight(),
+                Spacer(modifier = Modifier
+                    .height(1.dp)
+                    .fillMaxWidth()
+                    .background(Color.Black))
+                val stringBytesState = remember { mutableStateOf(TextFieldValue()) }
+                val parsedBytes = runCatching {
+                    BigInteger(stringBytesState.value.text, 16).toByteArray()
+                }.getOrNull()
+                AutoCompleteTextField(
                     value = stringBytesState.value,
-                    maxLines = 1,
-                    singleLine = true,
                     onValueChange = {
                         stringBytesState.value = it
                     },
+                    values = writes.orEmpty(),
+                    showTips = parsedBytes != null,
                 )
-                Spacer(modifier = Modifier.height(1.dp).fillMaxWidth().background(Color.Black))
-                val parsedBytes = try {
-                    BigInteger(stringBytesState.value,16).toByteArray()
-                } catch (e: Throwable) {
-                    null
-                }
+                Spacer(modifier = Modifier
+                    .height(1.dp)
+                    .fillMaxWidth()
+                    .background(Color.Black))
                 BasicText(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -251,12 +259,13 @@ internal fun DeviceScreen(
                         .fillMaxWidth()
                         .onClick(enabled = parsedBytes != null) {
                             selectedCharacteristicState.value = null
-                            BLEGattService.writeCharacteristic(
-                                context = context,
-                                service = service,
-                                characteristic = characteristic,
-                                bytes = checkNotNull(parsedBytes),
-                            )
+//                            BLEGattService.writeCharacteristic(
+//                                context = context,
+//                                service = service,
+//                                characteristic = characteristic,
+//                                bytes = checkNotNull(parsedBytes),
+//                            )
+                            viewModel.write(stringBytesState.value.text) // todo
                         }
                         .wrapContentSize(),
                     text = if (parsedBytes == null) "error" else { "write ${parsedBytes.size} bytes" },
