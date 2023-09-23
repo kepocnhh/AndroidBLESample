@@ -18,6 +18,16 @@ internal class DeviceViewModel(private val injection: Injection) : AbstractViewM
         }
     }
 
+    fun clearWrites() {
+        injection.launch {
+            _writes.value = withContext(injection.contexts.default) {
+                emptySet<String>().also {
+                    injection.local.writes = it
+                }
+            }
+        }
+    }
+
     fun write(value: String) {
         injection.launch {
             _writes.value = withContext(injection.contexts.default) {

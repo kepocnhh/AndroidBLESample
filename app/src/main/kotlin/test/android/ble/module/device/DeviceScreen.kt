@@ -2,7 +2,6 @@ package test.android.ble.module.device
 
 import android.util.Log
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -35,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import sp.ax.jc.clicks.clicks
 import sp.ax.jc.clicks.onClick
 import test.android.ble.App
 import test.android.ble.module.bluetooth.BLEGattService
@@ -52,6 +52,7 @@ private fun Button(
     text: String,
     enabled: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
 ) {
     val textStyle = TextStyle(
         textAlign = TextAlign.Center,
@@ -63,7 +64,11 @@ private fun Button(
         modifier = Modifier
             .height(48.dp)
             .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
+            .clicks(
+                enabled = enabled,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
             .wrapContentSize(),
         text = text,
         style = if (enabled) textStyle else disabledTextStyle,
@@ -129,16 +134,17 @@ internal fun DeviceScreen(
     val viewModel = App.viewModel<DeviceViewModel>()
     val writes by viewModel.writes.collectAsState()
     if (writes == null) viewModel.requestWrites()
-//    val gattState = BLEGattService.state.collectAsState().value
-    val gattState: BLEGattService.State = BLEGattService.State.Connected(
-        address = address,
-        type = BLEGattService.State.Connected.Type.READY,
-        services = mapOf(
-            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
-                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
-            ),
-        ),
-    )
+    val gattState = BLEGattService.state.collectAsState().value
+//    val gattState: BLEGattService.State = BLEGattService.State.Connected(
+//        address = address,
+//        type = BLEGattService.State.Connected.Type.READY,
+//        services = mapOf(
+//            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
+//                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
+//            ),
+//        ),
+//    )
+    val clearWritesDialogState = remember { mutableStateOf(false) }
     val selectServiceDialogState = remember { mutableStateOf(false) }
     val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
@@ -274,6 +280,38 @@ internal fun DeviceScreen(
             }
         }
     }
+    if (clearWritesDialogState.value) {
+        Dialog(
+            onDismissRequest = {
+                clearWritesDialogState.value = false
+            },
+        ) {
+            check(gattState is BLEGattService.State.Connected)
+            check(gattState.type == BLEGattService.State.Connected.Type.READY)
+            Column(
+                modifier = Modifier
+                    .background(Color.White)
+                    .padding(8.dp),
+            ) {
+                BasicText(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .fillMaxWidth(),
+                    text = "Do you want to clear saved writes?",
+                )
+                BasicText(
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .onClick {
+                            clearWritesDialogState.value = false
+                            viewModel.clearWrites()
+                        }
+                        .padding(8.dp),
+                    text = "Yes",
+                )
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         BLEGattService.broadcast.collect { broadcast ->
             when (broadcast) {
@@ -339,6 +377,9 @@ internal fun DeviceScreen(
                 enabled = gattState is BLEGattService.State.Connected && gattState.type == BLEGattService.State.Connected.Type.READY,
                 onClick = {
                     selectServiceDialogState.value = true
+                },
+                onLongClick = {
+                    clearWritesDialogState.value = true
                 },
             )
             Button(
