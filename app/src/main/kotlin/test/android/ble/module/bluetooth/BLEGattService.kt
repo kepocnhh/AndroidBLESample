@@ -39,6 +39,11 @@ import java.util.UUID
 internal class BLEGattService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
+        class OnWrite(
+            val service: UUID,
+            val characteristic: UUID,
+            val bytes: ByteArray,
+        ) : Broadcast
     }
 
     sealed interface State {
@@ -165,7 +170,7 @@ internal class BLEGattService : Service() {
                     if (gatt == null) TODO()
                     if (characteristic == null) TODO()
                     Log.d(TAG, "On characteristic ${characteristic.service.uuid}/${characteristic.uuid} write success.")
-                    onCharacteristicWrite()
+                    onCharacteristicWrite(characteristic)
                 }
                 else -> {
                     if (characteristic == null) {
@@ -290,11 +295,20 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onCharacteristicWrite() {
+    private fun onCharacteristicWrite(characteristic: BluetoothGattCharacteristic) {
         val state = state.value
         if (state !is State.Connected) TODO()
         if (state.type != State.Connected.Type.WRITING) TODO()
         _state.value = state.copy(type = State.Connected.Type.READY)
+        scope.launch {
+            _broadcast.emit(
+                Broadcast.OnWrite(
+                    service = characteristic.service.uuid,
+                    characteristic = characteristic.uuid,
+                    bytes = characteristic.value,
+                ),
+            )
+        }
     }
 
     private fun onServicesDiscovered(gatt: BluetoothGatt) {

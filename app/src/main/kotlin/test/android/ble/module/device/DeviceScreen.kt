@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -27,7 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
@@ -139,7 +137,7 @@ internal fun DeviceScreen(
             UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
                 UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
             ),
-        )
+        ),
     )
     val selectServiceDialogState = remember { mutableStateOf(false) }
     val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
@@ -259,13 +257,12 @@ internal fun DeviceScreen(
                         .fillMaxWidth()
                         .onClick(enabled = parsedBytes != null) {
                             selectedCharacteristicState.value = null
-//                            BLEGattService.writeCharacteristic(
-//                                context = context,
-//                                service = service,
-//                                characteristic = characteristic,
-//                                bytes = checkNotNull(parsedBytes),
-//                            )
-                            viewModel.write(stringBytesState.value.text) // todo
+                            BLEGattService.writeCharacteristic(
+                                context = context,
+                                service = service,
+                                characteristic = characteristic,
+                                bytes = checkNotNull(parsedBytes),
+                            )
                         }
                         .wrapContentSize(),
                     text = if (parsedBytes == null) "error" else { "write ${parsedBytes.size} bytes" },
@@ -305,6 +302,10 @@ internal fun DeviceScreen(
                             context.showToast("Unknown error!")
                         }
                     }
+                }
+                is BLEGattService.Broadcast.OnWrite -> {
+                    val value = String.format("%0${broadcast.bytes.size * 2}x", BigInteger(1, broadcast.bytes))
+                    viewModel.write(value)
                 }
             }
         }
