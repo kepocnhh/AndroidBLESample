@@ -1022,6 +1022,13 @@ internal class BLEGattService : Service() {
             context.startService(intent)
         }
 
+        fun pair(context: Context, pin: String) {
+            val intent = Intent(context, BLEGattService::class.java)
+            intent.action = ACTION_PAIR
+            intent.putExtra("pin", pin)
+            context.startService(intent)
+        }
+
         fun unpair(context: Context) {
             val intent = Intent(context, BLEGattService::class.java)
             intent.action = ACTION_UNPAIR

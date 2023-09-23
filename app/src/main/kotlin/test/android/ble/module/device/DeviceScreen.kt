@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -42,6 +43,7 @@ import test.android.ble.util.android.BLEException
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.PairException
+import test.android.ble.util.android.checkPIN
 import test.android.ble.util.android.showToast
 import test.android.ble.util.compose.AutoCompleteTextField
 import test.android.ble.util.compose.toPaddings
@@ -139,6 +141,7 @@ internal fun DeviceScreen(
 //    val gattState: BLEGattService.State = BLEGattService.State.Connected(
 //        address = address,
 //        type = BLEGattService.State.Connected.Type.READY,
+//        isPaired = false,
 //        services = mapOf(
 //            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
 //                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
@@ -313,6 +316,76 @@ internal fun DeviceScreen(
             }
         }
     }
+    val pairPinDialogState = remember { mutableStateOf(false) }
+    if (pairPinDialogState.value) {
+        Dialog(
+            onDismissRequest = {
+                pairPinDialogState.value = false
+            },
+        ) {
+            check(gattState is BLEGattService.State.Connected)
+            check(gattState.type == BLEGattService.State.Connected.Type.READY)
+            check(!gattState.isPaired)
+            Column(
+                modifier = Modifier
+                    .background(Color.White)
+                    .padding(8.dp),
+            ) {
+                val pinState = remember { mutableStateOf(TextFieldValue()) }
+                Box(
+                    modifier = Modifier
+                        .height(64.dp)
+                        .fillMaxWidth(),
+                ) {
+                    val textStyle = TextStyle(
+                        fontSize = 18.sp,
+                        textAlign = TextAlign.Center,
+                        color = Color.Black,
+                        letterSpacing = 4.sp,
+                    )
+                    BasicTextField(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .wrapContentHeight(),
+                        singleLine = true,
+                        maxLines = 1,
+                        value = pinState.value,
+                        onValueChange = {
+                            if (it.text.length > 6) {
+                                pinState.value = it.copy(text = it.text.substring(0, 6))
+                            } else {
+                                pinState.value = it
+                            }
+                        },
+                        textStyle = textStyle,
+                    )
+                    if (pinState.value.text.isEmpty()) {
+                        BasicText(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .wrapContentHeight(),
+                            text = "000000",
+                            style = textStyle.copy(color = Color.Gray),
+                        )
+                    }
+                }
+                val enabled = checkPIN(pinState.value.text)
+                BasicText(
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .onClick(enabled = enabled) {
+                            pairPinDialogState.value = false
+                            BLEGattService.pair(context, pin = pinState.value.text)
+                        }
+                        .padding(8.dp),
+                    text = "Set PIN",
+                    style = TextStyle(
+                        color = if (enabled) Color.Black else Color.Red,
+                    )
+                )
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         BLEGattService.broadcast.collect { broadcast ->
             when (broadcast) {
@@ -421,6 +494,11 @@ internal fun DeviceScreen(
                                 BLEGattService.pair(context)
                             }
                         },
+                        onLongClick = {
+                            if (!gattState.isPaired) {
+                                pairPinDialogState.value = true
+                            }
+                        }
                     )
                     Button(
                         text = "disconnect",

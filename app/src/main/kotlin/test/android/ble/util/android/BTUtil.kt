@@ -48,3 +48,10 @@ internal fun BluetoothDevice.removeBond(): Boolean {
     check(result is Boolean)
     return result
 }
+
+internal fun checkPIN(value: String): Boolean {
+    if (value.trim().isEmpty()) return false
+    if (value.any { char -> !char.isDigit() }) return false
+    if (value.isEmpty() || value.length > 6) return false
+    return true
+}
