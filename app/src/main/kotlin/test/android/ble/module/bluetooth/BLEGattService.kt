@@ -303,7 +303,26 @@ internal class BLEGattService : Service() {
         private fun onReceive(intent: Intent) {
             when (intent.action) {
                 BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
-                    TODO()
+                    val oldState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
+                    val newState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                        ?: TODO("No device!")
+                    val state = state.value
+                    if (state !is State.Connected) TODO("State: $state!")
+                    if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
+                    if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
+                    Log.d(TAG, "Bond state changed: $oldState -> $newState")
+                    when (newState) {
+                        BluetoothDevice.BOND_BONDED -> {
+                            _state.value = state.copy(type = State.Connected.Type.READY, isPaired = true)
+                        }
+                        BluetoothDevice.BOND_BONDING -> {
+                            Log.d(TAG, "bonding...")
+                        }
+                        else -> {
+                            TODO("State $newState unsupported!")
+                        }
+                    }
                 }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
                     val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
@@ -517,39 +536,6 @@ internal class BLEGattService : Service() {
         }
     }
 
-    /*
-    private fun onBTStateOn(gatt: BluetoothGatt) {
-        val context: Context = this
-        val bluetoothManager = getSystemService(BluetoothManager::class.java)
-        scope.launch {
-            runCatching {
-                val state = bluetoothManager.getConnectionState(gatt.device, BluetoothProfile.GATT)
-                Log.d(TAG, "on BT device state $state")
-                when (state) {
-                    BluetoothProfile.STATE_DISCONNECTED -> {
-                        val autoConnect = false
-                        gatt.device.connectGatt(context, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
-                    }
-                    BluetoothProfile.STATE_CONNECTED -> {
-                        _connectState.value = ConnectState.CONNECTED
-                    }
-                    else -> {
-                        // noop
-                    }
-                }
-            }.fold(
-                onSuccess = {
-                            // todo
-                },
-                onFailure = {
-                    Log.w(TAG, "BT state ON device ${gatt.device.address} error: $it")
-                    _connectState.value = ConnectState.DISCONNECTED
-                },
-            )
-        }
-    }
-    */
-
     private fun onConnectSuccess(gatt: BluetoothGatt) {
         Log.d(TAG, "connect success...")
         val state = state.value
@@ -745,10 +731,11 @@ internal class BLEGattService : Service() {
         if (state.type != State.Connected.Type.READY) TODO("pair state.type: ${state.type}")
         if (state.isPaired) TODO("Already paired!")
         _state.value = state.copy(type = State.Connected.Type.PAIRING)
+        val gatt = checkNotNull(gatt)
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
-                    TODO()
+                    if (!gatt.device.createBond()) TODO("Create bond error!")
                 }
             }.fold(
                 onSuccess = {
@@ -792,6 +779,53 @@ internal class BLEGattService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? {
         return null
+    }
+
+    private fun onNewState(oldState: State, newState: State) {
+        if (oldState is State.Connected) {
+            if (newState !is State.Connected) {
+                unregisterReceiver(receiversConnected)
+            }
+        } else {
+            if (newState is State.Connected) {
+                val filter = IntentFilter().also {
+                    it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                    it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+                }
+                registerReceiver(receiversConnected, filter)
+            }
+        }
+        if (oldState is State.Disconnected) {
+            if (newState !is State.Disconnected) {
+                val filter = IntentFilter().also {
+                    it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                    it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+                }
+                registerReceiver(receivers, filter)
+            }
+        } else {
+            if (newState is State.Disconnected) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                unregisterReceiver(receivers)
+            }
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        Log.d(TAG, "on create[${hashCode()}]...") // todo
+        state
+            .onEach { newState ->
+                onNewState(oldState, newState)
+                oldState = newState
+            }
+            .launchIn(scope)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Log.d(TAG, "on destroy...")
+        job.cancel()
     }
 
     companion object {
@@ -849,52 +883,5 @@ internal class BLEGattService : Service() {
             intent.action = ACTION_PAIR
             context.startService(intent)
         }
-    }
-
-    override fun onCreate() {
-        super.onCreate()
-        Log.d(TAG, "on create[${hashCode()}]...") // todo
-        state
-            .onEach { newState ->
-                onNewState(oldState, newState)
-                oldState = newState
-            }
-            .launchIn(scope)
-    }
-
-    private fun onNewState(oldState: State, newState: State) {
-        if (oldState is State.Connected) {
-            if (newState !is State.Connected) {
-                unregisterReceiver(receiversConnected)
-            }
-        } else {
-            if (newState is State.Connected) {
-                val filter = IntentFilter().also {
-                    it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
-                    it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-                }
-                registerReceiver(receiversConnected, filter)
-            }
-        }
-        if (oldState is State.Disconnected) {
-            if (newState !is State.Disconnected) {
-                val filter = IntentFilter().also {
-                    it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
-                    it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
-                }
-                registerReceiver(receivers, filter)
-            }
-        } else {
-            if (newState is State.Disconnected) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                unregisterReceiver(receivers)
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        Log.d(TAG, "on destroy...")
-        job.cancel()
     }
 }
