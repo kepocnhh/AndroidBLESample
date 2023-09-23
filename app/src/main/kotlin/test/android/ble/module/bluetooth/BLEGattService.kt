@@ -34,6 +34,7 @@ import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.PairException
+import test.android.ble.util.android.checkPIN
 import test.android.ble.util.android.isBTEnabled
 import test.android.ble.util.android.isLocationEnabled
 import test.android.ble.util.android.removeBond
@@ -102,6 +103,7 @@ internal class BLEGattService : Service() {
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Main + job)
     private var gatt: BluetoothGatt? = null
+    private var pin: String? = null
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             Log.d(TAG, "on scan result: callback $callbackType result $result")
@@ -308,7 +310,11 @@ internal class BLEGattService : Service() {
                         BluetoothDevice.PAIRING_VARIANT_PIN -> {
                             val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
                                 ?: TODO("No device!")
-                            onPINPairingRequest(address = device.address)
+                            val pin = pin
+                            if (pin != null) {
+                                this@BLEGattService.pin = pin
+                                onPINPairingRequest(address = device.address, pin = pin)
+                            }
                         }
                         else -> {
                             // noop
@@ -335,6 +341,7 @@ internal class BLEGattService : Service() {
                         BluetoothDevice.BOND_NONE -> {
                             when (oldState) {
                                 BluetoothDevice.BOND_BONDING -> {
+                                    pin = null
                                     val extras = intent.extras ?: TODO("No extras!")
                                     val reasonKey = "android.bluetooth.device.extra.REASON"
                                     if (extras.containsKey(reasonKey)) {
@@ -419,7 +426,7 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onPINPairingRequest(address: String) {
+    private fun onPINPairingRequest(address: String, pin: String) {
         val state = state.value
         if (state !is State.Connected) TODO("State: $state!")
         if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
@@ -427,15 +434,10 @@ internal class BLEGattService : Service() {
         Log.d(TAG, "PIN pairing request: $address")
         scope.launch {
             runCatching {
-                val stringPin = "000000"
-//                val stringPin = "000001"
-                val bytesPin = stringPin.toByteArray()
-                Log.d(TAG, "stringPin $stringPin bytesPin ${bytesPin.map { it.toInt() and 0xff }}")
-//                val bytesPin = byteArrayOf(0, 0, 0, 0, 0, 0)
                 val device = requireBTAdapter()
                     .getRemoteDevice(address)
                     ?: TODO("No device $address!")
-                if (!device.setPin(bytesPin)) TODO("Set pin error!")
+                if (!device.setPin(pin.toByteArray())) TODO("Set pin error!")
             }.fold(
                 onSuccess = {
                             // noop
@@ -833,7 +835,7 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onPair() {
+    private fun onPair(pin: String?) {
         Log.d(TAG, "on pair...")
         val state = state.value
         if (state !is State.Connected) TODO("pair state: $state")
@@ -843,9 +845,22 @@ internal class BLEGattService : Service() {
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
-                    val device = requireBTAdapter().getRemoteDevice(state.address)
+                    val device = requireBTAdapter()
+                        .getRemoteDevice(state.address)
                         ?: TODO("No device ${state.address}!")
-                    if (!device.createBond()) TODO("Create bond error!")
+                    when (val bondState = device.bondState) {
+                        BluetoothDevice.BOND_NONE -> {
+                            this@BLEGattService.pin = pin
+                            if (!device.createBond()) TODO("Create bond error!")
+                        }
+                        BluetoothDevice.BOND_BONDING -> {
+                            if (pin != null) {
+                                if (!device.setPin(pin.toByteArray())) TODO("Create bond error!")
+                            }
+                        }
+                        BluetoothDevice.BOND_BONDED -> TODO("Already bonded!")
+                        else -> TODO("Bond state $bondState unsupported!")
+                    }
                 }
             }.fold(
                 onSuccess = {
@@ -902,7 +917,13 @@ internal class BLEGattService : Service() {
                     bytes = bytes,
                 )
             }
-            ACTION_PAIR -> onPair()
+            ACTION_PAIR -> {
+                val pin = intent.getStringExtra("pin")
+                if (pin != null) {
+                    check(checkPIN(value = pin))
+                }
+                onPair(pin)
+            }
             ACTION_UNPAIR -> onUnpair()
             else -> TODO("Unknown action: ${intent.action}!")
         }
