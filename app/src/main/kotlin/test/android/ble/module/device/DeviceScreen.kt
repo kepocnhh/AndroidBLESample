@@ -41,6 +41,7 @@ import test.android.ble.module.bluetooth.BLEGattService
 import test.android.ble.util.android.BLEException
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.LocException
+import test.android.ble.util.android.PairException
 import test.android.ble.util.android.showToast
 import test.android.ble.util.compose.AutoCompleteTextField
 import test.android.ble.util.compose.toPaddings
@@ -344,6 +345,26 @@ internal fun DeviceScreen(
                 is BLEGattService.Broadcast.OnWrite -> {
                     val value = String.format("%0${broadcast.bytes.size * 2}x", BigInteger(1, broadcast.bytes))
                     viewModel.write(value)
+                }
+                is BLEGattService.Broadcast.OnPair -> {
+                    broadcast.result.fold(
+                        onSuccess = {
+                            // todo
+                        },
+                        onFailure = {
+                            when (it) {
+                                is PairException -> {
+                                    when (it.error) {
+                                        PairException.Error.FAILED -> context.showToast("Pair failed!")
+                                        PairException.Error.REJECTED -> context.showToast("Pair rejected!")
+                                        PairException.Error.CANCELED -> context.showToast("Pair canceled!")
+                                        else -> context.showToast("Unknown pair error!")
+                                    }
+                                }
+                                else -> context.showToast("Unknown error!")
+                            }
+                        },
+                    )
                 }
             }
         }

@@ -29,9 +29,11 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.LocException
+import test.android.ble.util.android.PairException
 import test.android.ble.util.android.isBTEnabled
 import test.android.ble.util.android.isLocationEnabled
 import test.android.ble.util.android.removeBond
@@ -48,6 +50,7 @@ internal class BLEGattService : Service() {
             val characteristic: UUID,
             val bytes: ByteArray,
         ) : Broadcast
+        class OnPair(val result: Result<BTDevice>) : Broadcast
     }
 
     sealed interface State {
@@ -207,11 +210,6 @@ internal class BLEGattService : Service() {
     private val receivers = object : BroadcastReceiver() {
         private fun onReceive(intent: Intent) {
             when (intent.action) {
-                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
-                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
-                    Log.d(TAG, "Bluetooth device state: ACTION_ACL_DISCONNECTED device ${device.address}")
-                    onBTDeviceDisconnected(device)
-                }
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                     Log.d(TAG, "Bluetooth adapter state: $state")
@@ -304,6 +302,19 @@ internal class BLEGattService : Service() {
     private val receiversConnected = object : BroadcastReceiver() {
         private fun onReceive(intent: Intent) {
             when (intent.action) {
+                BluetoothDevice.ACTION_PAIRING_REQUEST -> {
+                    val variant = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, BluetoothDevice.ERROR)
+                    when (variant) {
+                        BluetoothDevice.PAIRING_VARIANT_PIN -> {
+                            val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                                ?: TODO("No device!")
+                            onPINPairingRequest(address = device.address)
+                        }
+                        else -> {
+                            // noop
+                        }
+                    }
+                }
                 BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
                     val oldState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
                     val newState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
@@ -316,7 +327,7 @@ internal class BLEGattService : Service() {
                     Log.d(TAG, "Bond state changed: $oldState -> $newState")
                     when (newState) {
                         BluetoothDevice.BOND_BONDED -> {
-                            _state.value = state.copy(type = State.Connected.Type.READY, isPaired = true)
+                            onBonded(device)
                         }
                         BluetoothDevice.BOND_BONDING -> {
                             Log.d(TAG, "bonding...")
@@ -324,7 +335,32 @@ internal class BLEGattService : Service() {
                         BluetoothDevice.BOND_NONE -> {
                             when (oldState) {
                                 BluetoothDevice.BOND_BONDING -> {
-                                    _state.value = state.copy(type = State.Connected.Type.READY, isPaired = false)
+                                    val extras = intent.extras ?: TODO("No extras!")
+                                    val reasonKey = "android.bluetooth.device.extra.REASON"
+                                    if (extras.containsKey(reasonKey)) {
+                                        val reason = intent.getIntExtra(reasonKey, BluetoothDevice.ERROR)
+                                        val UNBOND_REASON_AUTH_FAILED = 1
+                                        val UNBOND_REASON_AUTH_REJECTED = 2
+                                        val UNBOND_REASON_AUTH_CANCELED = 3
+                                        val error = when (reason) {
+                                            UNBOND_REASON_AUTH_FAILED -> {
+                                                Log.w(TAG, "No pairing because auth failed!")
+                                                PairException.Error.FAILED
+                                            }
+                                            UNBOND_REASON_AUTH_REJECTED -> {
+                                                Log.w(TAG, "No pairing because auth rejected!")
+                                                PairException.Error.REJECTED
+                                            }
+                                            UNBOND_REASON_AUTH_CANCELED -> {
+                                                Log.w(TAG, "No pairing because auth canceled!")
+                                                PairException.Error.CANCELED
+                                            }
+                                            else -> null
+                                        }
+                                        onBondingFailed(device, error)
+                                    } else {
+                                        onBondingFailed(device, null)
+                                    }
                                 }
                                 else -> TODO("State $oldState -> $newState unsupported!")
                             }
@@ -345,6 +381,69 @@ internal class BLEGattService : Service() {
 
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent != null) onReceive(intent)
+        }
+    }
+
+    private fun onBondingFailed(device: BluetoothDevice, error: PairException.Error?) {
+        val state = state.value
+        if (state !is State.Connected) TODO("State: $state!")
+        if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
+        if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
+        _state.value = state.copy(type = State.Connected.Type.READY, isPaired = false)
+        scope.launch {
+            _broadcast.emit(
+                Broadcast.OnPair(
+                    Result.failure(PairException(error)),
+                ),
+            )
+        }
+    }
+
+    private fun onBonded(device: BluetoothDevice) {
+        val state = state.value
+        if (state !is State.Connected) TODO("State: $state!")
+        if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
+        if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
+        _state.value = state.copy(type = State.Connected.Type.READY, isPaired = true)
+        scope.launch {
+            _broadcast.emit(
+                Broadcast.OnPair(
+                    Result.success(
+                        BTDevice(
+                            address = device.address ?: TODO("No address!"),
+                            name = device.name ?: TODO("No name!"),
+                        ),
+                    ),
+                ),
+            )
+        }
+    }
+
+    private fun onPINPairingRequest(address: String) {
+        val state = state.value
+        if (state !is State.Connected) TODO("State: $state!")
+        if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
+        if (state.address != address) TODO("Expected ${state.address}, actual $address!")
+        Log.d(TAG, "PIN pairing request: $address")
+        scope.launch {
+            runCatching {
+                val stringPin = "000000"
+//                val stringPin = "000001"
+                val bytesPin = stringPin.toByteArray()
+                Log.d(TAG, "stringPin $stringPin bytesPin ${bytesPin.map { it.toInt() and 0xff }}")
+//                val bytesPin = byteArrayOf(0, 0, 0, 0, 0, 0)
+                val device = requireBTAdapter()
+                    .getRemoteDevice(address)
+                    ?: TODO("No device $address!")
+                if (!device.setPin(bytesPin)) TODO("Set pin error!")
+            }.fold(
+                onSuccess = {
+                            // noop
+                },
+                onFailure = {
+                    Log.w(TAG, "PIN pairing request error: $it")
+                },
+            )
         }
     }
 
@@ -425,12 +524,14 @@ internal class BLEGattService : Service() {
     }
 
     private fun disconnect() {
+        val state = state.value
+        if (state !is State.Disconnecting) TODO("state: $state")
         _state.value = State.Disconnected
         val oldGatt = checkNotNull(gatt)
         try {
             oldGatt.close()
         } catch (e: Throwable) {
-            Log.w(TAG, "Close gatt ${oldGatt.device.address} error: $e")
+            Log.w(TAG, "Close gatt ${state.address} error: $e")
         }
         gatt = null
     }
@@ -447,7 +548,7 @@ internal class BLEGattService : Service() {
         try {
             oldGatt.close()
         } catch (e: Throwable) {
-            Log.w(TAG, "Close gatt ${oldGatt.device.address} error: $e")
+            Log.w(TAG, "Close gatt ${state.address} error: $e")
         }
         gatt = null
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -573,11 +674,11 @@ internal class BLEGattService : Service() {
         val address = state.address
         _state.value = State.Connecting(address = address, type = State.Connecting.Type.CONNECTS)
         val service: Service = this
+        ForegroundUtil.startForeground(
+            service = service,
+            title = "connecting $address...",
+        )
         scope.launch {
-            ForegroundUtil.startForeground(
-                service = service,
-                title = "connecting $address...",
-            )
             runCatching {
                 withContext(Dispatchers.Default) {
                     val autoConnect = false
@@ -739,11 +840,12 @@ internal class BLEGattService : Service() {
         if (state.type != State.Connected.Type.READY) TODO("pair state.type: ${state.type}")
         if (state.isPaired) TODO("Already paired!")
         _state.value = state.copy(type = State.Connected.Type.PAIRING)
-        val gatt = checkNotNull(gatt)
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
-                    if (!gatt.device.createBond()) TODO("Create bond error!")
+                    val device = requireBTAdapter().getRemoteDevice(state.address)
+                        ?: TODO("No device ${state.address}!")
+                    if (!device.createBond()) TODO("Create bond error!")
                 }
             }.fold(
                 onSuccess = {
@@ -763,11 +865,12 @@ internal class BLEGattService : Service() {
         if (state.type != State.Connected.Type.READY) TODO("unpair state.type: ${state.type}")
         if (!state.isPaired) TODO("Already unpaired!")
         _state.value = state.copy(type = State.Connected.Type.UNPAIRING)
-        val gatt = checkNotNull(gatt)
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
-                    if (!gatt.device.removeBond()) TODO("Remove bond error!")
+                    val device = requireBTAdapter().getRemoteDevice(state.address)
+                        ?: TODO("No device ${state.address}!")
+                    if (!device.removeBond()) TODO("Remove bond error!")
                 }
             }.fold(
                 onSuccess = {
@@ -824,6 +927,7 @@ internal class BLEGattService : Service() {
                 val filter = IntentFilter().also {
                     it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
                     it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+                    it.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
                 }
                 registerReceiver(receiversConnected, filter)
             }

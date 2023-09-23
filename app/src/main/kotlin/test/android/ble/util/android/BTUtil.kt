@@ -13,6 +13,14 @@ internal class BTException(val error: Error) : Exception() {
     }
 }
 
+internal class PairException(val error: Error?) : Exception() {
+    enum class Error {
+        FAILED,
+        REJECTED,
+        CANCELED,
+    }
+}
+
 internal fun Context.isBTEnabled(): Boolean {
     val adapter = getSystemService(BluetoothManager::class.java)
         .adapter ?: throw BTException(BTException.Error.NO_ADAPTER)

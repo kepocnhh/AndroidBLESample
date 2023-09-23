@@ -29,7 +29,10 @@ import test.android.ble.util.android.scanStop
 internal class BLEScannerService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
-        class OnBTDevice(val device: BTDevice) : Broadcast
+        class OnBTDevice(
+            val device: BTDevice,
+            val rawData: ByteArray,
+        ) : Broadcast
     }
 
     enum class ScanState {
@@ -49,11 +52,11 @@ internal class BLEScannerService : Service() {
             val btDevice = BTDevice(
                 address = device.address ?: return,
                 name = device.name ?: return,
-                rawData = scanRecord.bytes ?: return,
             )
+            val rawData = scanRecord.bytes ?: return
             scope.launch {
                 _broadcast.emit(
-                    Broadcast.OnBTDevice(btDevice),
+                    Broadcast.OnBTDevice(btDevice, rawData = rawData),
                 )
             }
         }
