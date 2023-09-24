@@ -310,7 +310,7 @@ private fun Characteristics(
         writes = writes,
         onBytes = {
             val (service, characteristic) = selectedCharacteristicState.value!!
-            BLEGattService.writeCharacteristic(
+            BLEGattService.Profile.writeCharacteristic(
                 context = context,
                 service = service,
                 characteristic = characteristic,
@@ -395,7 +395,7 @@ private fun Descriptors(
         writes = writes,
         onBytes = {
             val (service, characteristic, descriptor) = selectedDescriptorState.value!!
-            BLEGattService.writeDescriptor(
+            BLEGattService.Profile.writeDescriptor(
                 context = context,
                 service = service,
                 characteristic = characteristic,
@@ -420,7 +420,7 @@ private fun Descriptors(
         },
         onSelect = { key ->
             val (service, characteristic, descriptor) = selectValueState.value!!
-            BLEGattService.writeDescriptor(
+            BLEGattService.Profile.writeDescriptor(
                 context = context,
                 service = service,
                 characteristic = characteristic,
@@ -626,12 +626,12 @@ internal fun DeviceScreen(
         }
     }
     LaunchedEffect(Unit) {
-        BLEGattService.attributes.collect { attribute ->
+        BLEGattService.Profile.broadcast.collect { attribute ->
             when (attribute) {
-                is BLEGattService.AttributeProfile.OnReadCharacteristic -> {
+                is BLEGattService.Profile.Broadcast.OnReadCharacteristic -> {
                     // todo
                 }
-                is BLEGattService.AttributeProfile.OnWriteCharacteristic -> {
+                is BLEGattService.Profile.Broadcast.OnWriteCharacteristic -> {
                     val bytes = attribute.bytes
                     val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
                     viewModel.write(value)

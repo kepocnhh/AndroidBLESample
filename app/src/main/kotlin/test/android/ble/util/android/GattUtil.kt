@@ -8,15 +8,11 @@ internal object GattUtil {
         gatt: BluetoothGatt,
         service: UUID,
         characteristic: UUID,
-        bytes: ByteArray,
     ) {
         val service = gatt.getService(service)
             ?: TODO("No service $service!")
         val characteristic = service.getCharacteristic(characteristic)
             ?: TODO("No characteristic $characteristic!")
-        if (!characteristic.setValue(bytes)) {
-            TODO("Characteristic set value error!")
-        }
         if (!gatt.readCharacteristic(characteristic)) {
             TODO("GATT write C error!")
         }

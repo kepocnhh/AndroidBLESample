@@ -51,19 +51,6 @@ internal class BLEGattService : Service() {
         object OnDisconnect : Broadcast
     }
 
-    sealed interface AttributeProfile {
-        class OnWriteCharacteristic(
-            val service: UUID,
-            val characteristic: UUID,
-            val bytes: ByteArray,
-        ) : AttributeProfile
-        class OnReadCharacteristic(
-            val service: UUID,
-            val characteristic: UUID,
-            val bytes: ByteArray,
-        ) : AttributeProfile
-    }
-
     sealed interface State {
         data class Connecting(
             val address: String,
@@ -536,8 +523,8 @@ internal class BLEGattService : Service() {
         if (state.type != State.Connected.Type.READING) TODO("On characteristic read state type: ${state.type}")
         _state.value = state.copy(type = State.Connected.Type.READY)
         scope.launch {
-            _attributes.emit(
-                AttributeProfile.OnReadCharacteristic(
+            _profileBroadcast.emit(
+                Profile.Broadcast.OnReadCharacteristic(
                     service = characteristic.service.uuid,
                     characteristic = characteristic.uuid,
                     bytes = characteristic.value,
@@ -552,8 +539,8 @@ internal class BLEGattService : Service() {
         if (state.type != State.Connected.Type.WRITING) TODO("On characteristic write state type: ${state.type}")
         _state.value = state.copy(type = State.Connected.Type.READY)
         scope.launch {
-            _attributes.emit(
-                AttributeProfile.OnWriteCharacteristic(
+            _profileBroadcast.emit(
+                Profile.Broadcast.OnWriteCharacteristic(
                     service = characteristic.service.uuid,
                     characteristic = characteristic.uuid,
                     bytes = characteristic.value,
@@ -1186,43 +1173,21 @@ internal class BLEGattService : Service() {
         UNPAIR,
     }
 
-    companion object {
-        private const val TAG = "[Gatt]"
-
-        private val _broadcast = MutableSharedFlow<Broadcast>()
-        @JvmStatic
-        val broadcast = _broadcast.asSharedFlow()
-
-        private val _attributes = MutableSharedFlow<AttributeProfile>()
-        val attributes = _attributes.asSharedFlow()
-
-        private var oldState: State = State.Disconnected
-        private val _state = MutableStateFlow<State>(State.Disconnected)
-        @JvmStatic
-        val state = _state.asStateFlow()
-
-        private fun intent(context: Context, action: Action): Intent {
-            val intent = Intent(context, BLEGattService::class.java)
-            intent.action = Action.CONNECT.name
-            return intent
+    object Profile {
+        sealed interface Broadcast {
+            class OnWriteCharacteristic(
+                val service: UUID,
+                val characteristic: UUID,
+                val bytes: ByteArray,
+            ) : Broadcast
+            class OnReadCharacteristic(
+                val service: UUID,
+                val characteristic: UUID,
+                val bytes: ByteArray,
+            ) : Broadcast
         }
 
-        @JvmStatic
-        fun connect(context: Context, address: String) {
-            val intent = intent(context, Action.CONNECT)
-            intent.putExtra("address", address)
-            context.startService(intent)
-        }
-
-        fun disconnect(context: Context) {
-            val intent = intent(context, Action.DISCONNECT)
-            context.startService(intent)
-        }
-
-        fun searchStop(context: Context) {
-            val intent = intent(context, Action.SEARCH_STOP)
-            context.startService(intent)
-        }
+        val broadcast = _profileBroadcast.asSharedFlow()
 
         fun writeCharacteristic(
             context: Context,
@@ -1260,6 +1225,44 @@ internal class BLEGattService : Service() {
             intent.putExtra("characteristic", characteristic.toString())
             intent.putExtra("descriptor", descriptor.toString())
             intent.putExtra("bytes", bytes)
+            context.startService(intent)
+        }
+    }
+
+    companion object {
+        private const val TAG = "[Gatt]"
+
+        private val _broadcast = MutableSharedFlow<Broadcast>()
+        @JvmStatic
+        val broadcast = _broadcast.asSharedFlow()
+
+        private var oldState: State = State.Disconnected
+        private val _state = MutableStateFlow<State>(State.Disconnected)
+        @JvmStatic
+        val state = _state.asStateFlow()
+
+        private val _profileBroadcast = MutableSharedFlow<Profile.Broadcast>()
+
+        private fun intent(context: Context, action: Action): Intent {
+            val intent = Intent(context, BLEGattService::class.java)
+            intent.action = action.name
+            return intent
+        }
+
+        @JvmStatic
+        fun connect(context: Context, address: String) {
+            val intent = intent(context, Action.CONNECT)
+            intent.putExtra("address", address)
+            context.startService(intent)
+        }
+
+        fun disconnect(context: Context) {
+            val intent = intent(context, Action.DISCONNECT)
+            context.startService(intent)
+        }
+
+        fun searchStop(context: Context) {
+            val intent = intent(context, Action.SEARCH_STOP)
             context.startService(intent)
         }
 
