@@ -520,7 +520,9 @@ internal class BLEGattService : Service() {
     private fun onDescriptorWrite(descriptor: BluetoothGattDescriptor) {
         val state = state.value
         if (state !is State.Connected) TODO("On descriptor write state: $state")
-        // todo
+        if (state.type != State.Connected.Type.WRITING) TODO("On descriptor write state type: ${state.type}")
+        _state.value = state.copy(type = State.Connected.Type.READY)
+        // todo descriptor
     }
 
     private fun onServicesDiscovered(gatt: BluetoothGatt) {
@@ -925,6 +927,7 @@ internal class BLEGattService : Service() {
         Log.d(TAG, "on write descriptor ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
         if (state !is State.Connected) TODO("Write D state: $state")
+        _state.value = state.copy(type = State.Connected.Type.WRITING)
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {

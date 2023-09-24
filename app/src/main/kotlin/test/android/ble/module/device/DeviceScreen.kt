@@ -1,5 +1,6 @@
 package test.android.ble.module.device
 
+import android.bluetooth.BluetoothGattDescriptor
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -84,6 +85,7 @@ private fun <T : Any> ListSelect(
     title: String,
     items: List<T>,
     onClick: (T) -> Unit,
+    onLongClick: (T) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -115,9 +117,14 @@ private fun <T : Any> ListSelect(
                     modifier = Modifier
                         .height(48.dp)
                         .fillMaxWidth()
-                        .onClick {
-                            onClick(item)
-                        }
+                        .clicks(
+                            onClick = {
+                                onClick(item)
+                            },
+                            onLongClick = {
+                                onLongClick(item)
+                            }
+                        )
                         .wrapContentHeight()
                         .padding(start = 8.dp),
                     text = item.toString(),
@@ -135,6 +142,7 @@ private fun <T : Any> DialogListSelect(
     title: String,
     itemsSupplier: () -> List<T>,
     onSelect: (T) -> Unit,
+    onLongClick: (T) -> Unit = {},
 ) {
     if (!visible) return
     Dialog(onDismissRequest = onDismissRequest) {
@@ -145,6 +153,10 @@ private fun <T : Any> DialogListSelect(
                 onSelect(it)
                 onDismissRequest()
             },
+            onLongClick = {
+                onLongClick(it)
+                onDismissRequest()
+            }
         )
     }
 }
@@ -321,6 +333,7 @@ private fun Descriptors(
     val selectedService = selectedServiceState.value
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
     val selectedDescriptorState = remember { mutableStateOf<Triple<UUID, UUID, UUID>?>(null) }
+    val selectValueState = remember { mutableStateOf<Triple<UUID, UUID, UUID>?>(null) }
     DialogListSelect(
         visible = writeState.value,
         onDismissRequest = {
@@ -332,7 +345,7 @@ private fun Descriptors(
         },
         onSelect = {
             selectedServiceState.value = it
-        }
+        },
     )
     DialogListSelect(
         visible = selectedServiceState.value != null,
@@ -345,7 +358,7 @@ private fun Descriptors(
         },
         onSelect = {
             selectedCharacteristicState.value = selectedService!! to it
-        }
+        },
     )
     DialogListSelect(
         visible = selectedCharacteristicState.value != null,
@@ -362,6 +375,10 @@ private fun Descriptors(
         onSelect = {
             val (service, characteristic) = selectedCharacteristicState.value!!
             selectedDescriptorState.value = Triple(service, characteristic, it)
+        },
+        onLongClick = {
+            val (service, characteristic) = selectedCharacteristicState.value!!
+            selectValueState.value = Triple(service, characteristic, it)
         }
     )
     DialogEnterBytes(
@@ -384,6 +401,31 @@ private fun Descriptors(
                 characteristic = characteristic,
                 descriptor = descriptor,
                 bytes = it,
+            )
+        },
+    )
+    val values = mapOf(
+        "DISABLE_NOTIFICATION_VALUE" to BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE,
+        "ENABLE_INDICATION_VALUE" to BluetoothGattDescriptor.ENABLE_INDICATION_VALUE,
+        "ENABLE_NOTIFICATION_VALUE" to BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE,
+    )
+    DialogListSelect(
+        visible = selectValueState.value != null,
+        onDismissRequest = {
+            selectValueState.value = null
+        },
+        title = "Value",
+        itemsSupplier = {
+            values.keys.sorted()
+        },
+        onSelect = { key ->
+            val (service, characteristic, descriptor) = selectValueState.value!!
+            BLEGattService.writeDescriptor(
+                context = context,
+                service = service,
+                characteristic = characteristic,
+                descriptor = descriptor,
+                bytes = values[key]!!,
             )
         },
     )
