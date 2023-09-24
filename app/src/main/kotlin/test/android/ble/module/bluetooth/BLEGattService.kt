@@ -6,7 +6,6 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
-import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -52,6 +51,7 @@ internal class BLEGattService : Service() {
             val bytes: ByteArray,
         ) : Broadcast
         class OnPair(val result: Result<BTDevice>) : Broadcast
+        object OnDisconnect : Broadcast
     }
 
     sealed interface State {
@@ -106,7 +106,7 @@ internal class BLEGattService : Service() {
     private var pin: String? = null
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            Log.d(TAG, "on scan result: callback $callbackType result $result")
+            Log.d(TAG, "on scan device [$callbackType] ${result?.device?.address}/${result?.device?.name}")
             when (val bleState = state.value) {
                 is State.Search -> {
                     when (bleState.type) {
@@ -965,6 +965,9 @@ internal class BLEGattService : Service() {
             if (newState is State.Disconnected) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 unregisterReceiver(receivers)
+                scope.launch {
+                    _broadcast.emit(Broadcast.OnDisconnect)
+                }
             }
         }
     }
@@ -974,8 +977,12 @@ internal class BLEGattService : Service() {
         Log.d(TAG, "on create[${hashCode()}]...") // todo
         state
             .onEach { newState ->
-                onNewState(oldState, newState)
-                oldState = newState
+                oldState.also {
+                    if (it != newState) {
+                        onNewState(it, newState)
+                        oldState = newState
+                    }
+                }
             }
             .launchIn(scope)
     }
