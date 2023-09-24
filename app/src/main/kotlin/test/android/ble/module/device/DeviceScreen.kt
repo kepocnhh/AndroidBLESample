@@ -291,6 +291,7 @@ private fun Characteristics(
         },
         title = "Characteristic",
         itemsSupplier = {
+            // todo writable
             gattState.services[selectedServiceState.value!!]!!.keys.sorted()
         },
         onSelect = {
@@ -626,15 +627,18 @@ internal fun DeviceScreen(
         }
     }
     LaunchedEffect(Unit) {
-        BLEGattService.Profile.broadcast.collect { attribute ->
-            when (attribute) {
+        BLEGattService.Profile.broadcast.collect { broadcast ->
+            when (broadcast) {
                 is BLEGattService.Profile.Broadcast.OnReadCharacteristic -> {
                     // todo
                 }
                 is BLEGattService.Profile.Broadcast.OnWriteCharacteristic -> {
-                    val bytes = attribute.bytes
+                    val bytes = broadcast.bytes
                     val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
                     viewModel.write(value)
+                }
+                is BLEGattService.Profile.Broadcast.OnServicesDiscovered -> {
+                    // todo
                 }
             }
         }

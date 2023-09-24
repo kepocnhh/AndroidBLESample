@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -54,10 +55,12 @@ internal class BLEGattService : Service() {
     sealed interface State {
         data class Connecting(
             val address: String,
+            @Deprecated("Connected.DISCOVER")
             val type: Type,
         ) : State {
             enum class Type {
                 CONNECTS,
+                @Deprecated("Connected.DISCOVER")
                 DISCOVER,
             }
         }
@@ -84,6 +87,7 @@ internal class BLEGattService : Service() {
             val address: String,
             val isPaired: Boolean,
             val type: Type,
+            @Deprecated("Connected.DISCOVER")
             val services: Map<UUID, Map<UUID, Set<UUID>>>,
         ) : State {
             enum class Type {
@@ -92,6 +96,7 @@ internal class BLEGattService : Service() {
                 WRITING,
                 PAIRING,
                 UNPAIRING,
+                DISCOVER,
             }
         }
         data class Disconnecting(val address: String) : State
@@ -216,7 +221,17 @@ internal class BLEGattService : Service() {
                 BluetoothGatt.GATT_SUCCESS -> {
                     if (gatt == null) TODO()
                     Log.d(TAG, "On services discovered success.")
-                    onServicesDiscovered(gatt)
+                    when (val state = state.value) {
+                        is State.Connected -> {
+                            if (state.type != State.Connected.Type.DISCOVER) TODO("On services discovered Connected type: ${state.type}")
+                            onServicesDiscoveredConnected()
+                        }
+                        is State.Connecting -> {
+                            if (state.type != State.Connecting.Type.DISCOVER) TODO("On services discovered Connecting type: ${state.type}")
+                            onServicesDiscovered(gatt)
+                        }
+                        else -> TODO("")
+                    }
                 }
                 else -> {
                     Log.w(TAG, "On services discovered $status!")
@@ -557,6 +572,30 @@ internal class BLEGattService : Service() {
         // todo descriptor
     }
 
+    private fun onServicesDiscoveredConnected() {
+        val state = state.value
+        if (state !is State.Connected) TODO("On services discovered Connected state: $state")
+        if (state.type != State.Connected.Type.DISCOVER) TODO("On services discovered Connected state type: ${state.type}")
+        val gatt = gatt ?: TODO("No GATT!")
+        _state.value = State.Connected(
+            address = state.address,
+            isPaired = gatt.device.bondState == BluetoothDevice.BOND_BONDED,
+            type = State.Connected.Type.READY,
+            services = gatt.services.associate { gs ->
+                gs.uuid to gs.characteristics.associate { gc ->
+                    gc.uuid to gc.descriptors.map { it.uuid }.toSet()
+                }
+            },
+        )
+        scope.launch {
+            _profileBroadcast.emit(
+                Profile.Broadcast.OnServicesDiscovered(
+                    gatt.services,
+                ),
+            )
+        }
+    }
+
     private fun onServicesDiscovered(gatt: BluetoothGatt) {
         val state = state.value
         if (state !is State.Connecting) TODO()
@@ -878,9 +917,8 @@ internal class BLEGattService : Service() {
     private fun onReadCharacteristic(
         service: UUID,
         characteristic: UUID,
-        bytes: ByteArray,
     ) {
-        Log.d(TAG, "on read characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
+        Log.d(TAG, "on read characteristic $service/$characteristic...")
         val state = state.value
         if (state !is State.Connected) TODO("Read C state: $state")
         if (state.type != State.Connected.Type.READY) TODO("Read C state type: ${state.type}")
@@ -892,7 +930,6 @@ internal class BLEGattService : Service() {
                         gatt = checkNotNull(gatt),
                         service = service,
                         characteristic = characteristic,
-                        bytes = bytes,
                     )
                 }
             }.fold(
@@ -1032,6 +1069,29 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onRequestServices() {
+        Log.d(TAG, "on request services...")
+        val state = state.value
+        if (state !is State.Connected) TODO("On request services state: $state")
+        if (state.type != State.Connected.Type.READY) TODO("On request services state.type: ${state.type}")
+        _state.value = state.copy(type = State.Connected.Type.DISCOVER)
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    val gatt = gatt ?: TODO("No GATT!")
+                    if (!gatt.discoverServices()) TODO("Discover services error!")
+                }
+            }.fold(
+                onSuccess = {
+                    // todo
+                },
+                onFailure = {
+                    TODO("On request services error: $it!")
+                },
+            )
+        }
+    }
+
     private fun onStartCommand(intent: Intent) {
         val intentAction = intent.action ?: TODO("No intent action!")
         if (intentAction.isEmpty()) TODO("Intent action is empty!")
@@ -1039,8 +1099,8 @@ internal class BLEGattService : Service() {
             Action.CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
             Action.SEARCH_STOP -> onStopSearch()
             Action.DISCONNECT -> onDisconnect()
+            Action.REQUEST_SERVICES -> onRequestServices()
             Action.READ_CHARACTERISTIC -> {
-                val bytes = intent.getByteArrayExtra("bytes") ?: TODO("No bytes!")
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
                     ?: TODO("No service!")
@@ -1050,7 +1110,6 @@ internal class BLEGattService : Service() {
                 onReadCharacteristic(
                     service = service,
                     characteristic = characteristic,
-                    bytes = bytes,
                 )
             }
             Action.WRITE_CHARACTERISTIC -> {
@@ -1166,6 +1225,7 @@ internal class BLEGattService : Service() {
         CONNECT,
         DISCONNECT,
         SEARCH_STOP,
+        REQUEST_SERVICES,
         READ_CHARACTERISTIC,
         WRITE_CHARACTERISTIC,
         WRITE_DESCRIPTOR,
@@ -1185,9 +1245,17 @@ internal class BLEGattService : Service() {
                 val characteristic: UUID,
                 val bytes: ByteArray,
             ) : Broadcast
+            class OnServicesDiscovered(
+                val services: List<BluetoothGattService>, // todo platform!
+            ) : Broadcast
         }
 
         val broadcast = _profileBroadcast.asSharedFlow()
+
+        fun requestServices(context: Context) {
+            val intent = intent(context, Action.REQUEST_SERVICES)
+            context.startService(intent)
+        }
 
         fun writeCharacteristic(
             context: Context,
