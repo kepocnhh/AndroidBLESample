@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -127,29 +128,12 @@ private fun <T : Any> ListSelect(
 }
 
 @Composable
-internal fun DeviceScreen(
-    address: String,
-    onForget: () -> Unit,
+private fun Characteristics(
+    selectServiceDialogState: MutableState<Boolean>,
+    gattState: BLEGattService.State,
+    writes: Set<String>,
 ) {
-    val TAG = "[Device|Screen]"
     val context = LocalContext.current
-    val insets = LocalView.current.rootWindowInsets.toPaddings()
-    val viewModel = App.viewModel<DeviceViewModel>()
-    val writes by viewModel.writes.collectAsState()
-    if (writes == null) viewModel.requestWrites()
-    val gattState = BLEGattService.state.collectAsState().value
-//    val gattState: BLEGattService.State = BLEGattService.State.Connected(
-//        address = address,
-//        type = BLEGattService.State.Connected.Type.READY,
-//        isPaired = false,
-//        services = mapOf(
-//            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
-//                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
-//            ),
-//        ),
-//    )
-    val clearWritesDialogState = remember { mutableStateOf(false) }
-    val selectServiceDialogState = remember { mutableStateOf(false) }
     val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
     val selectedService = selectedServiceState.value
@@ -181,7 +165,7 @@ internal fun DeviceScreen(
             check(gattState.type == BLEGattService.State.Connected.Type.READY)
             ListSelect(
                 title = "Characteristic",
-                items = gattState.services[selectedService]!!.sorted(),
+                items = gattState.services[selectedService]!!.keys.sorted(),
                 onClick = {
                     selectedServiceState.value = null
                     selectedCharacteristicState.value = selectedService to it
@@ -235,7 +219,7 @@ internal fun DeviceScreen(
                     onValueChange = {
                         stringBytesState.value = it
                     },
-                    values = writes.orEmpty(),
+                    values = writes,
                     showTips = parsedBytes != null,
                 )
                 Spacer(modifier = Modifier
@@ -252,10 +236,10 @@ internal fun DeviceScreen(
                             .groupBy(keySelector = { it.index / 4 }, valueTransform = { it.value })
                             .values
                             .joinToString(separator = "\n") { list ->
-                            list.joinToString(separator = " ") {
-                                String.format("%03d", it.toInt() and 0xFF)
+                                list.joinToString(separator = " ") {
+                                    String.format("%03d", it.toInt() and 0xFF)
+                                }
                             }
-                        }
                     }, // todo
                     style = TextStyle(
                         fontSize = 14.sp,
@@ -284,6 +268,42 @@ internal fun DeviceScreen(
             }
         }
     }
+}
+
+@Composable
+private fun Descriptors() {
+
+}
+
+@Composable
+internal fun DeviceScreen(
+    address: String,
+    onForget: () -> Unit,
+) {
+    val TAG = "[Device|Screen]"
+    val context = LocalContext.current
+    val insets = LocalView.current.rootWindowInsets.toPaddings()
+    val viewModel = App.viewModel<DeviceViewModel>()
+    val writes by viewModel.writes.collectAsState()
+    if (writes == null) viewModel.requestWrites()
+    val gattState = BLEGattService.state.collectAsState().value
+//    val gattState: BLEGattService.State = BLEGattService.State.Connected(
+//        address = address,
+//        type = BLEGattService.State.Connected.Type.READY,
+//        isPaired = false,
+//        services = mapOf(
+//            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
+//                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
+//            ),
+//        ),
+//    )
+    val selectServiceDialogState = remember { mutableStateOf(false) }
+    Characteristics(
+        selectServiceDialogState = selectServiceDialogState,
+        gattState = gattState,
+        writes = writes.orEmpty(),
+    )
+    val clearWritesDialogState = remember { mutableStateOf(false) }
     if (clearWritesDialogState.value) {
         Dialog(
             onDismissRequest = {

@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -85,7 +86,7 @@ internal class BLEGattService : Service() {
             val address: String,
             val isPaired: Boolean,
             val type: Type,
-            val services: Map<UUID, Set<UUID>>,
+            val services: Map<UUID, Map<UUID, Set<UUID>>>,
         ) : State {
             enum class Type {
                 READY,
@@ -214,6 +215,29 @@ internal class BLEGattService : Service() {
         ) {
             Log.d(TAG, "On characteristic ${characteristic.service.uuid}/${characteristic.uuid} changed.")
             onCharacteristicChanged(characteristic, value)
+        }
+
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt?,
+            descriptor: BluetoothGattDescriptor?,
+            status: Int
+        ) {
+            when (status) {
+                BluetoothGatt.GATT_SUCCESS -> {
+                    if (gatt == null) TODO("No gatt!")
+                    if (descriptor == null) TODO("No descriptor!")
+                    Log.i(TAG, "On descriptor ${descriptor.characteristic.service.uuid}/${descriptor.characteristic.uuid}/${descriptor.uuid} write success.")
+                    onDescriptorWrite(descriptor)
+                }
+                else -> {
+                    if (descriptor == null) {
+                        Log.w(TAG, "On descriptor write $status!")
+                    } else {
+                        Log.w(TAG, "On descriptor ${descriptor.characteristic.service.uuid}/${descriptor.characteristic.uuid}/${descriptor.uuid} write $status!")
+                    }
+                    // todo
+                }
+            }
         }
     }
     private val receivers = object : BroadcastReceiver() {
@@ -493,6 +517,12 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onDescriptorWrite(descriptor: BluetoothGattDescriptor) {
+        val state = state.value
+        if (state !is State.Connected) TODO("On descriptor write state: $state")
+        // todo
+    }
+
     private fun onServicesDiscovered(gatt: BluetoothGatt) {
         val state = state.value
         if (state !is State.Connecting) TODO()
@@ -512,7 +542,9 @@ internal class BLEGattService : Service() {
             isPaired = gatt.device.bondState == BluetoothDevice.BOND_BONDED,
             type = State.Connected.Type.READY,
             services = gatt.services.associate { gs ->
-                gs.uuid to gs.characteristics.map { it.uuid }.toSet()
+                gs.uuid to gs.characteristics.associate { gc ->
+                    gc.uuid to gc.descriptors.map { it.uuid }.toSet()
+                }
             },
         )
     }
@@ -825,11 +857,32 @@ internal class BLEGattService : Service() {
             ?: TODO("No service $service!")
         val characteristic = service.getCharacteristic(characteristic)
             ?: TODO("No characteristic $characteristic!")
-//        val status = gatt.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-        characteristic.value = bytes
-        val success = gatt.writeCharacteristic(characteristic)
-        if (!success) {
-            TODO("GATT write error!")
+        if (!characteristic.setValue(bytes)) {
+            TODO("Characteristic set value error!")
+        }
+        if (!gatt.writeCharacteristic(characteristic)) {
+            TODO("GATT write C error!")
+        }
+    }
+
+    private fun writeDescriptor(
+        gatt: BluetoothGatt,
+        service: UUID,
+        characteristic: UUID,
+        descriptor: UUID,
+        bytes: ByteArray,
+    ) {
+        val service = gatt.getService(service)
+            ?: TODO("No service $service!")
+        val characteristic = service.getCharacteristic(characteristic)
+            ?: TODO("No characteristic ${service.uuid}/$characteristic!")
+        val descriptor = characteristic.getDescriptor(descriptor)
+            ?: TODO("No descriptor ${service.uuid}/${characteristic.uuid}/$descriptor!")
+        if (!descriptor.setValue(bytes)) {
+            TODO("Descriptor set value error!")
+        }
+        if (!gatt.writeDescriptor(descriptor)) {
+            TODO("GATT write D error!")
         }
     }
 
@@ -840,7 +893,7 @@ internal class BLEGattService : Service() {
     ) {
         Log.d(TAG, "on write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
-        if (state !is State.Connected) TODO("connect state: $state")
+        if (state !is State.Connected) TODO("Write C state: $state")
         _state.value = state.copy(type = State.Connected.Type.WRITING)
         scope.launch {
             runCatching {
@@ -857,7 +910,38 @@ internal class BLEGattService : Service() {
                     // todo
                 },
                 onFailure = {
-                    TODO("GATT write error: $it!")
+                    TODO("GATT write C error: $it!")
+                },
+            )
+        }
+    }
+
+    private fun onWriteDescriptor(
+        service: UUID,
+        characteristic: UUID,
+        descriptor: UUID,
+        bytes: ByteArray,
+    ) {
+        Log.d(TAG, "on write descriptor ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
+        val state = state.value
+        if (state !is State.Connected) TODO("Write D state: $state")
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    writeDescriptor(
+                        gatt = checkNotNull(gatt),
+                        service = service,
+                        characteristic = characteristic,
+                        descriptor = descriptor,
+                        bytes = bytes,
+                    )
+                }
+            }.fold(
+                onSuccess = {
+                    // todo
+                },
+                onFailure = {
+                    TODO("GATT write D error: $it!")
                 },
             )
         }
@@ -945,6 +1029,24 @@ internal class BLEGattService : Service() {
                     bytes = bytes,
                 )
             }
+            ACTION_WRITE_DESCRIPTOR -> {
+                val bytes = intent.getByteArrayExtra("bytes") ?: TODO("No bytes!")
+                val service = intent.getStringExtra("service")
+                    ?.let(UUID::fromString)
+                    ?: TODO("No service!")
+                val characteristic = intent.getStringExtra("characteristic")
+                    ?.let(UUID::fromString)
+                    ?: TODO("No characteristic!")
+                val descriptor = intent.getStringExtra("descriptor")
+                    ?.let(UUID::fromString)
+                    ?: TODO("No descriptor!")
+                onWriteDescriptor(
+                    service = service,
+                    characteristic = characteristic,
+                    descriptor = descriptor,
+                    bytes = bytes,
+                )
+            }
             ACTION_PAIR -> {
                 val pin = intent.getStringExtra("pin")
                 if (pin != null) {
@@ -1027,6 +1129,7 @@ internal class BLEGattService : Service() {
         private val ACTION_DISCONNECT = "${this::class.java.name}:ACTION_DISCONNECT"
         private val ACTION_SEARCH_STOP = "${this::class.java.name}:ACTION_SEARCH_STOP"
         private val ACTION_WRITE_CHARACTERISTIC = "${this::class.java.name}:ACTION_WRITE_CHARACTERISTIC"
+        private val ACTION_WRITE_DESCRIPTOR = "${this::class.java.name}:ACTION_WRITE_DESCRIPTOR"
         private val ACTION_PAIR = "${this::class.java.name}:ACTION_PAIR"
         private val ACTION_UNPAIR = "${this::class.java.name}:ACTION_UNPAIR"
 
@@ -1068,6 +1171,22 @@ internal class BLEGattService : Service() {
             intent.action = ACTION_WRITE_CHARACTERISTIC
             intent.putExtra("service", service.toString())
             intent.putExtra("characteristic", characteristic.toString())
+            intent.putExtra("bytes", bytes)
+            context.startService(intent)
+        }
+
+        fun writeDescriptor(
+            context: Context,
+            service: UUID,
+            characteristic: UUID,
+            descriptor: UUID,
+            bytes: ByteArray,
+        ) {
+            val intent = Intent(context, BLEGattService::class.java)
+            intent.action = ACTION_WRITE_DESCRIPTOR
+            intent.putExtra("service", service.toString())
+            intent.putExtra("characteristic", characteristic.toString())
+            intent.putExtra("descriptor", descriptor.toString())
             intent.putExtra("bytes", bytes)
             context.startService(intent)
         }
