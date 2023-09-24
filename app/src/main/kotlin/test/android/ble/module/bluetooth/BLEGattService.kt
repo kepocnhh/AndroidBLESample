@@ -30,9 +30,9 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import test.android.ble.entity.BTDevice
-import test.android.ble.entity.BTNotification
 import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BTException
+import test.android.ble.util.android.GattUtil
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.PairException
 import test.android.ble.util.android.checkPIN
@@ -47,10 +47,21 @@ import java.util.UUID
 internal class BLEGattService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
-        class OnWrite(val notification: BTNotification) : Broadcast
-        class OnChanged(val notification: BTNotification) : Broadcast
         class OnPair(val result: Result<BTDevice>) : Broadcast
         object OnDisconnect : Broadcast
+    }
+
+    sealed interface AttributeProfile {
+        class OnWriteCharacteristic(
+            val service: UUID,
+            val characteristic: UUID,
+            val bytes: ByteArray,
+        ) : AttributeProfile
+        class OnReadCharacteristic(
+            val service: UUID,
+            val characteristic: UUID,
+            val bytes: ByteArray,
+        ) : AttributeProfile
     }
 
     sealed interface State {
@@ -90,6 +101,7 @@ internal class BLEGattService : Service() {
         ) : State {
             enum class Type {
                 READY,
+                READING,
                 WRITING,
                 PAIRING,
                 UNPAIRING,
@@ -167,6 +179,24 @@ internal class BLEGattService : Service() {
                 }
                 else -> {
                     // noop
+                }
+            }
+        }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int
+        ) {
+            when (status) {
+                BluetoothGatt.GATT_SUCCESS -> {
+                    Log.d(TAG, "On characteristic ${characteristic.service.uuid}/${characteristic.uuid} read success.")
+                    onCharacteristicRead(characteristic)
+                }
+                else -> {
+                    Log.w(TAG, "On characteristic ${characteristic.service.uuid}/${characteristic.uuid} read $status!")
+                    // todo
                 }
             }
         }
@@ -486,14 +516,31 @@ internal class BLEGattService : Service() {
     ) {
         val state = state.value
         if (state !is State.Connected) TODO("On characteristic changed state: $state")
+        // todo
         scope.launch {
-            _broadcast.emit(
-                Broadcast.OnChanged(
-                    BTNotification(
-                        service = characteristic.service.uuid,
-                        characteristic = characteristic.uuid,
-                        bytes = value,
-                    ),
+//            _broadcast.emit(
+//                Broadcast.OnChanged(
+//                    BTNotification(
+//                        service = characteristic.service.uuid,
+//                        characteristic = characteristic.uuid,
+//                        bytes = value,
+//                    ),
+//                ),
+//            )
+        }
+    }
+
+    private fun onCharacteristicRead(characteristic: BluetoothGattCharacteristic) {
+        val state = state.value
+        if (state !is State.Connected) TODO("On characteristic read state: $state")
+        if (state.type != State.Connected.Type.READING) TODO("On characteristic read state type: ${state.type}")
+        _state.value = state.copy(type = State.Connected.Type.READY)
+        scope.launch {
+            _attributes.emit(
+                AttributeProfile.OnReadCharacteristic(
+                    service = characteristic.service.uuid,
+                    characteristic = characteristic.uuid,
+                    bytes = characteristic.value,
                 ),
             )
         }
@@ -505,13 +552,11 @@ internal class BLEGattService : Service() {
         if (state.type != State.Connected.Type.WRITING) TODO("On characteristic write state type: ${state.type}")
         _state.value = state.copy(type = State.Connected.Type.READY)
         scope.launch {
-            _broadcast.emit(
-                Broadcast.OnWrite(
-                    BTNotification(
-                        service = characteristic.service.uuid,
-                        characteristic = characteristic.uuid,
-                        bytes = characteristic.value,
-                    ),
+            _attributes.emit(
+                AttributeProfile.OnWriteCharacteristic(
+                    service = characteristic.service.uuid,
+                    characteristic = characteristic.uuid,
+                    bytes = characteristic.value,
                 ),
             )
         }
@@ -531,13 +576,11 @@ internal class BLEGattService : Service() {
         if (state.type != State.Connecting.Type.DISCOVER) TODO()
         val service = this
         this.gatt = gatt
-        val intent = Intent(service, BLEGattService::class.java)
-        intent.action = ACTION_DISCONNECT
         ForegroundUtil.startForeground(
             service = service,
             title = "connected ${state.address}",
             action = "disconnect",
-            intent = intent,
+            intent = intent(service, Action.DISCONNECT),
         )
         _state.value = State.Connected(
             address = state.address,
@@ -634,13 +677,11 @@ internal class BLEGattService : Service() {
             }
         }.fold(
             onSuccess = {
-                val intent = Intent(service, BLEGattService::class.java)
-                intent.action = ACTION_SEARCH_STOP
                 ForegroundUtil.startForeground(
                     service = service,
                     title = "searching ${state.address}...",
                     action = "stop",
-                    intent = intent,
+                    intent = intent(service, Action.SEARCH_STOP),
                 )
                 _state.value = State.Search(
                     address = state.address,
@@ -669,13 +710,11 @@ internal class BLEGattService : Service() {
     }
 
     private fun startForegroundWaiting() {
-        val intent = Intent(this, BLEGattService::class.java)
-        intent.action = ACTION_SEARCH_STOP
         ForegroundUtil.startForeground(
             service = this,
             title = "search waiting...",
             action = "stop",
-            intent = intent,
+            intent = intent(this, Action.SEARCH_STOP),
         )
     }
 
@@ -849,42 +888,34 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun writeCharacteristic(
-        gatt: BluetoothGatt,
+    private fun onReadCharacteristic(
         service: UUID,
         characteristic: UUID,
         bytes: ByteArray,
     ) {
-        val service = gatt.getService(service)
-            ?: TODO("No service $service!")
-        val characteristic = service.getCharacteristic(characteristic)
-            ?: TODO("No characteristic $characteristic!")
-        if (!characteristic.setValue(bytes)) {
-            TODO("Characteristic set value error!")
-        }
-        if (!gatt.writeCharacteristic(characteristic)) {
-            TODO("GATT write C error!")
-        }
-    }
-
-    private fun writeDescriptor(
-        gatt: BluetoothGatt,
-        service: UUID,
-        characteristic: UUID,
-        descriptor: UUID,
-        bytes: ByteArray,
-    ) {
-        val service = gatt.getService(service)
-            ?: TODO("No service $service!")
-        val characteristic = service.getCharacteristic(characteristic)
-            ?: TODO("No characteristic ${service.uuid}/$characteristic!")
-        val descriptor = characteristic.getDescriptor(descriptor)
-            ?: TODO("No descriptor ${service.uuid}/${characteristic.uuid}/$descriptor!")
-        if (!descriptor.setValue(bytes)) {
-            TODO("Descriptor set value error!")
-        }
-        if (!gatt.writeDescriptor(descriptor)) {
-            TODO("GATT write D error!")
+        Log.d(TAG, "on read characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
+        val state = state.value
+        if (state !is State.Connected) TODO("Read C state: $state")
+        if (state.type != State.Connected.Type.READY) TODO("Read C state type: ${state.type}")
+        _state.value = state.copy(type = State.Connected.Type.READING)
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    GattUtil.readCharacteristic(
+                        gatt = checkNotNull(gatt),
+                        service = service,
+                        characteristic = characteristic,
+                        bytes = bytes,
+                    )
+                }
+            }.fold(
+                onSuccess = {
+                    // todo
+                },
+                onFailure = {
+                    TODO("GATT read C error: $it!")
+                },
+            )
         }
     }
 
@@ -896,11 +927,12 @@ internal class BLEGattService : Service() {
         Log.d(TAG, "on write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
         if (state !is State.Connected) TODO("Write C state: $state")
+        if (state.type != State.Connected.Type.READY) TODO("Write C state type: ${state.type}")
         _state.value = state.copy(type = State.Connected.Type.WRITING)
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
-                    writeCharacteristic(
+                    GattUtil.writeCharacteristic(
                         gatt = checkNotNull(gatt),
                         service = service,
                         characteristic = characteristic,
@@ -931,7 +963,7 @@ internal class BLEGattService : Service() {
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
-                    writeDescriptor(
+                    GattUtil.writeDescriptor(
                         gatt = checkNotNull(gatt),
                         service = service,
                         characteristic = characteristic,
@@ -1014,11 +1046,27 @@ internal class BLEGattService : Service() {
     }
 
     private fun onStartCommand(intent: Intent) {
-        when (intent.action) {
-            ACTION_CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
-            ACTION_SEARCH_STOP -> onStopSearch()
-            ACTION_DISCONNECT -> onDisconnect()
-            ACTION_WRITE_CHARACTERISTIC -> {
+        val intentAction = intent.action ?: TODO("No intent action!")
+        if (intentAction.isEmpty()) TODO("Intent action is empty!")
+        when (Action.values().firstOrNull { it.name == intentAction }) {
+            Action.CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
+            Action.SEARCH_STOP -> onStopSearch()
+            Action.DISCONNECT -> onDisconnect()
+            Action.READ_CHARACTERISTIC -> {
+                val bytes = intent.getByteArrayExtra("bytes") ?: TODO("No bytes!")
+                val service = intent.getStringExtra("service")
+                    ?.let(UUID::fromString)
+                    ?: TODO("No service!")
+                val characteristic = intent.getStringExtra("characteristic")
+                    ?.let(UUID::fromString)
+                    ?: TODO("No characteristic!")
+                onReadCharacteristic(
+                    service = service,
+                    characteristic = characteristic,
+                    bytes = bytes,
+                )
+            }
+            Action.WRITE_CHARACTERISTIC -> {
                 val bytes = intent.getByteArrayExtra("bytes") ?: TODO("No bytes!")
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
@@ -1032,7 +1080,7 @@ internal class BLEGattService : Service() {
                     bytes = bytes,
                 )
             }
-            ACTION_WRITE_DESCRIPTOR -> {
+            Action.WRITE_DESCRIPTOR -> {
                 val bytes = intent.getByteArrayExtra("bytes") ?: TODO("No bytes!")
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
@@ -1050,20 +1098,21 @@ internal class BLEGattService : Service() {
                     bytes = bytes,
                 )
             }
-            ACTION_PAIR -> {
+            Action.PAIR -> {
                 val pin = intent.getStringExtra("pin")
                 if (pin != null) {
                     check(checkPIN(value = pin))
                 }
                 onPair(pin)
             }
-            ACTION_UNPAIR -> onUnpair()
+            Action.UNPAIR -> onUnpair()
             else -> TODO("Unknown action: ${intent.action}!")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent != null) onStartCommand(intent)
+        if (intent == null) TODO("No intent!")
+        onStartCommand(intent)
         return START_NOT_STICKY
     }
 
@@ -1126,41 +1175,52 @@ internal class BLEGattService : Service() {
         job.cancel()
     }
 
+    private enum class Action {
+        CONNECT,
+        DISCONNECT,
+        SEARCH_STOP,
+        READ_CHARACTERISTIC,
+        WRITE_CHARACTERISTIC,
+        WRITE_DESCRIPTOR,
+        PAIR,
+        UNPAIR,
+    }
+
     companion object {
         private const val TAG = "[Gatt]"
-        private val ACTION_CONNECT = "${this::class.java.name}:ACTION_CONNECT"
-        private val ACTION_DISCONNECT = "${this::class.java.name}:ACTION_DISCONNECT"
-        private val ACTION_SEARCH_STOP = "${this::class.java.name}:ACTION_SEARCH_STOP"
-        private val ACTION_WRITE_CHARACTERISTIC = "${this::class.java.name}:ACTION_WRITE_CHARACTERISTIC"
-        private val ACTION_WRITE_DESCRIPTOR = "${this::class.java.name}:ACTION_WRITE_DESCRIPTOR"
-        private val ACTION_PAIR = "${this::class.java.name}:ACTION_PAIR"
-        private val ACTION_UNPAIR = "${this::class.java.name}:ACTION_UNPAIR"
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
         @JvmStatic
         val broadcast = _broadcast.asSharedFlow()
+
+        private val _attributes = MutableSharedFlow<AttributeProfile>()
+        val attributes = _attributes.asSharedFlow()
+
         private var oldState: State = State.Disconnected
         private val _state = MutableStateFlow<State>(State.Disconnected)
         @JvmStatic
         val state = _state.asStateFlow()
 
+        private fun intent(context: Context, action: Action): Intent {
+            val intent = Intent(context, BLEGattService::class.java)
+            intent.action = Action.CONNECT.name
+            return intent
+        }
+
         @JvmStatic
         fun connect(context: Context, address: String) {
-            val intent = Intent(context, BLEGattService::class.java)
-            intent.action = ACTION_CONNECT
+            val intent = intent(context, Action.CONNECT)
             intent.putExtra("address", address)
             context.startService(intent)
         }
 
         fun disconnect(context: Context) {
-            val intent = Intent(context, BLEGattService::class.java)
-            intent.action = ACTION_DISCONNECT
+            val intent = intent(context, Action.DISCONNECT)
             context.startService(intent)
         }
 
         fun searchStop(context: Context) {
-            val intent = Intent(context, BLEGattService::class.java)
-            intent.action = ACTION_SEARCH_STOP
+            val intent = intent(context, Action.SEARCH_STOP)
             context.startService(intent)
         }
 
@@ -1170,11 +1230,21 @@ internal class BLEGattService : Service() {
             characteristic: UUID,
             bytes: ByteArray,
         ) {
-            val intent = Intent(context, BLEGattService::class.java)
-            intent.action = ACTION_WRITE_CHARACTERISTIC
+            val intent = intent(context, Action.WRITE_CHARACTERISTIC)
             intent.putExtra("service", service.toString())
             intent.putExtra("characteristic", characteristic.toString())
             intent.putExtra("bytes", bytes)
+            context.startService(intent)
+        }
+
+        fun readCharacteristic(
+            context: Context,
+            service: UUID,
+            characteristic: UUID,
+        ) {
+            val intent = intent(context, Action.READ_CHARACTERISTIC)
+            intent.putExtra("service", service.toString())
+            intent.putExtra("characteristic", characteristic.toString())
             context.startService(intent)
         }
 
@@ -1185,8 +1255,7 @@ internal class BLEGattService : Service() {
             descriptor: UUID,
             bytes: ByteArray,
         ) {
-            val intent = Intent(context, BLEGattService::class.java)
-            intent.action = ACTION_WRITE_DESCRIPTOR
+            val intent = intent(context, Action.WRITE_DESCRIPTOR)
             intent.putExtra("service", service.toString())
             intent.putExtra("characteristic", characteristic.toString())
             intent.putExtra("descriptor", descriptor.toString())
@@ -1195,21 +1264,18 @@ internal class BLEGattService : Service() {
         }
 
         fun pair(context: Context) {
-            val intent = Intent(context, BLEGattService::class.java)
-            intent.action = ACTION_PAIR
+            val intent = intent(context, Action.PAIR)
             context.startService(intent)
         }
 
         fun pair(context: Context, pin: String) {
-            val intent = Intent(context, BLEGattService::class.java)
-            intent.action = ACTION_PAIR
+            val intent = intent(context, Action.PAIR)
             intent.putExtra("pin", pin)
             context.startService(intent)
         }
 
         fun unpair(context: Context) {
-            val intent = Intent(context, BLEGattService::class.java)
-            intent.action = ACTION_UNPAIR
+            val intent = intent(context, Action.UNPAIR)
             context.startService(intent)
         }
     }

@@ -599,14 +599,6 @@ internal fun DeviceScreen(
                         }
                     }
                 }
-                is BLEGattService.Broadcast.OnWrite -> {
-                    val bytes = broadcast.notification.bytes
-                    val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
-                    viewModel.write(value)
-                }
-                is BLEGattService.Broadcast.OnChanged -> {
-                    // todo
-                }
                 is BLEGattService.Broadcast.OnPair -> {
                     broadcast.result.fold(
                         onSuccess = {
@@ -629,6 +621,20 @@ internal fun DeviceScreen(
                 }
                 BLEGattService.Broadcast.OnDisconnect -> {
                     context.showToast("Disconnected.")
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        BLEGattService.attributes.collect { attribute ->
+            when (attribute) {
+                is BLEGattService.AttributeProfile.OnReadCharacteristic -> {
+                    // todo
+                }
+                is BLEGattService.AttributeProfile.OnWriteCharacteristic -> {
+                    val bytes = attribute.bytes
+                    val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
+                    viewModel.write(value)
                 }
             }
         }
