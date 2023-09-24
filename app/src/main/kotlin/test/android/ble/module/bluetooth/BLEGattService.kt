@@ -588,7 +588,16 @@ internal class BLEGattService : Service() {
         if (state !is State.Connected) TODO("On descriptor write state: $state")
         if (state.type != State.Connected.Type.WRITING) TODO("On descriptor write state type: ${state.type}")
         _state.value = state.copy(type = State.Connected.Type.READY)
-        // todo descriptor
+        scope.launch {
+            _profileBroadcast.emit(
+                Profile.Broadcast.OnWriteDescriptor(
+                    service = descriptor.characteristic.service.uuid,
+                    characteristic = descriptor.characteristic.uuid,
+                    descriptor = descriptor.uuid,
+                    bytes = descriptor.value,
+                ),
+            )
+        }
     }
 
     private fun onServicesDiscoveredConnected() {
@@ -1302,6 +1311,12 @@ internal class BLEGattService : Service() {
             class OnWriteCharacteristic(
                 val service: UUID,
                 val characteristic: UUID,
+                val bytes: ByteArray,
+            ) : Broadcast
+            class OnWriteDescriptor(
+                val service: UUID,
+                val characteristic: UUID,
+                val descriptor: UUID,
                 val bytes: ByteArray,
             ) : Broadcast
             class OnReadCharacteristic(

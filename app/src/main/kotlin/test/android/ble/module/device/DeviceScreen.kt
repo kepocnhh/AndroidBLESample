@@ -296,7 +296,15 @@ private fun Characteristics(
         },
         onSelect = {
             selectedCharacteristicState.value = selectedServiceState.value!! to it
-        }
+        },
+        onLongClick = {
+            BLEGattService.Profile.setCharacteristicNotification(
+                context = context,
+                service = selectedServiceState.value!!,
+                characteristic = it,
+                value = true,
+            )
+        },
     )
     DialogEnterBytes(
         visible = selectedCharacteristicState.value != null,
@@ -633,6 +641,11 @@ internal fun DeviceScreen(
                     // todo
                 }
                 is BLEGattService.Profile.Broadcast.OnWriteCharacteristic -> {
+                    val bytes = broadcast.bytes
+                    val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
+                    viewModel.write(value)
+                }
+                is BLEGattService.Profile.Broadcast.OnWriteDescriptor -> {
                     val bytes = broadcast.bytes
                     val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
                     viewModel.write(value)
