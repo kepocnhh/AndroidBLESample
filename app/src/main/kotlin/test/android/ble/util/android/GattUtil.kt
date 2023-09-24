@@ -4,6 +4,21 @@ import android.bluetooth.BluetoothGatt
 import java.util.UUID
 
 internal object GattUtil {
+    fun setCharacteristicNotification(
+        gatt: BluetoothGatt,
+        service: UUID,
+        characteristic: UUID,
+        value: Boolean,
+    ) {
+        val service = gatt.getService(service)
+            ?: TODO("No service $service!")
+        val characteristic = service.getCharacteristic(characteristic)
+            ?: TODO("No characteristic $characteristic!")
+        if (!gatt.setCharacteristicNotification(characteristic, value)) {
+            TODO("Set characteristic notification $value error!")
+        }
+    }
+
     fun readCharacteristic(
         gatt: BluetoothGatt,
         service: UUID,
@@ -14,7 +29,7 @@ internal object GattUtil {
         val characteristic = service.getCharacteristic(characteristic)
             ?: TODO("No characteristic $characteristic!")
         if (!gatt.readCharacteristic(characteristic)) {
-            TODO("GATT write C error!")
+            TODO("GATT read C error!")
         }
     }
 

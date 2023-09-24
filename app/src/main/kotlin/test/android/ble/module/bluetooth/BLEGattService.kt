@@ -454,6 +454,25 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun <T> launchCatching(
+        block: suspend () -> T,
+        onSuccess: suspend (T) -> Unit,
+        onFailure: suspend (Throwable) -> Unit,
+    ) {
+        scope.launch {
+            runCatching {
+                block()
+            }.fold(
+                onSuccess = {
+                    onSuccess(it)
+                },
+                onFailure = {
+                    onFailure(it)
+                }
+            )
+        }
+    }
+
     private fun onBondingFailed(device: BluetoothDevice, error: PairException.Error?) {
         val state = state.value
         if (state !is State.Connected) TODO("State: $state!")
@@ -1073,7 +1092,7 @@ internal class BLEGattService : Service() {
         Log.d(TAG, "on request services...")
         val state = state.value
         if (state !is State.Connected) TODO("On request services state: $state")
-        if (state.type != State.Connected.Type.READY) TODO("On request services state.type: ${state.type}")
+        if (state.type != State.Connected.Type.READY) TODO("On request services state type: ${state.type}")
         _state.value = state.copy(type = State.Connected.Type.DISCOVER)
         scope.launch {
             runCatching {
@@ -1092,6 +1111,35 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onSetCharacteristicNotification(
+        service: UUID,
+        characteristic: UUID,
+        value: Boolean,
+    ) {
+        Log.d(TAG, "on set characteristic notification...")
+        val state = state.value
+        if (state !is State.Connected) TODO("On set characteristic notification state: $state")
+        if (state.type != State.Connected.Type.READY) TODO("On set characteristic notification state type: ${state.type}")
+        launchCatching(
+            block = {
+                withContext(Dispatchers.Default) {
+                    GattUtil.setCharacteristicNotification(
+                        gatt = gatt ?: TODO("No GATT!"),
+                        service = service,
+                        characteristic = characteristic,
+                        value = value,
+                    )
+                }
+            },
+            onSuccess = {
+                // todo
+            },
+            onFailure = {
+                TODO("On set characteristic notification error: $it!")
+            },
+        )
+    }
+
     private fun onStartCommand(intent: Intent) {
         val intentAction = intent.action ?: TODO("No intent action!")
         if (intentAction.isEmpty()) TODO("Intent action is empty!")
@@ -1100,6 +1148,21 @@ internal class BLEGattService : Service() {
             Action.SEARCH_STOP -> onStopSearch()
             Action.DISCONNECT -> onDisconnect()
             Action.REQUEST_SERVICES -> onRequestServices()
+            Action.SET_CHARACTERISTIC_NOTIFICATION -> {
+                val extras = intent.extras ?: TODO("No extras!")
+                if (!extras.containsKey("value")) TODO("No value!")
+                val service = intent.getStringExtra("service")
+                    ?.let(UUID::fromString)
+                    ?: TODO("No service!")
+                val characteristic = intent.getStringExtra("characteristic")
+                    ?.let(UUID::fromString)
+                    ?: TODO("No characteristic!")
+                onSetCharacteristicNotification(
+                    service = service,
+                    characteristic = characteristic,
+                    value = intent.getBooleanExtra("value", false),
+                )
+            }
             Action.READ_CHARACTERISTIC -> {
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
@@ -1226,6 +1289,7 @@ internal class BLEGattService : Service() {
         DISCONNECT,
         SEARCH_STOP,
         REQUEST_SERVICES,
+        SET_CHARACTERISTIC_NOTIFICATION,
         READ_CHARACTERISTIC,
         WRITE_CHARACTERISTIC,
         WRITE_DESCRIPTOR,
@@ -1254,6 +1318,19 @@ internal class BLEGattService : Service() {
 
         fun requestServices(context: Context) {
             val intent = intent(context, Action.REQUEST_SERVICES)
+            context.startService(intent)
+        }
+
+        fun setCharacteristicNotification(
+            context: Context,
+            service: UUID,
+            characteristic: UUID,
+            value: Boolean,
+        ) {
+            val intent = intent(context, Action.SET_CHARACTERISTIC_NOTIFICATION)
+            intent.putExtra("service", service.toString())
+            intent.putExtra("characteristic", characteristic.toString())
+            intent.putExtra("value", value)
             context.startService(intent)
         }
 
