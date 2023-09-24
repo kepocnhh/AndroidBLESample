@@ -184,8 +184,9 @@ private fun DialogEnterBytes(
                 .fillMaxWidth()
                 .background(Color.Black))
             val stringBytesState = remember { mutableStateOf(TextFieldValue()) }
+            val stringBytes = stringBytesState.value.text
             val parsedBytes = runCatching {
-                BigInteger(stringBytesState.value.text, 16).toByteArray()
+                BigInteger(stringBytes, 16).toByteArray()
             }.getOrNull()
             AutoCompleteTextField(
                 value = stringBytesState.value,
@@ -222,15 +223,25 @@ private fun DialogEnterBytes(
                 modifier = Modifier
                     .height(48.dp)
                     .fillMaxWidth()
-                    .onClick(enabled = parsedBytes != null) {
-                        onBytes(checkNotNull(parsedBytes))
+                    .onClick(enabled = stringBytes.isEmpty() || parsedBytes != null) {
+                        if (stringBytes.isEmpty()) {
+                            onBytes(byteArrayOf())
+                        } else {
+                            onBytes(checkNotNull(parsedBytes))
+                        }
                         onDismissRequest()
                     }
                     .wrapContentSize(),
-                text = if (parsedBytes == null) "error" else { "write ${parsedBytes.size} bytes" },
+                text = if (stringBytes.isEmpty()) {
+                    "write empty array"
+                } else if (parsedBytes == null) {
+                    "error"
+                } else {
+                    "write ${parsedBytes.size} bytes"
+                },
                 style = TextStyle(
                     fontSize = 14.sp,
-                    color = if (parsedBytes == null) Color.Red else Color.Black,
+                    color = if (parsedBytes == null && stringBytes.isNotEmpty()) Color.Red else Color.Black,
                 ),
             )
         }
@@ -389,19 +400,19 @@ internal fun DeviceScreen(
     val viewModel = App.viewModel<DeviceViewModel>()
     val writes by viewModel.writes.collectAsState()
     if (writes == null) viewModel.requestWrites()
-//    val gattState = BLEGattService.state.collectAsState().value
-    val gattState: BLEGattService.State = BLEGattService.State.Connected(
-        address = address,
-        type = BLEGattService.State.Connected.Type.READY,
-        isPaired = true,
-        services = mapOf(
-            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to mapOf(
-                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19") to setOf(
-                    UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed20"),
-                ),
-            ),
-        ),
-    )
+    val gattState = BLEGattService.state.collectAsState().value
+//    val gattState: BLEGattService.State = BLEGattService.State.Connected(
+//        address = address,
+//        type = BLEGattService.State.Connected.Type.READY,
+//        isPaired = true,
+//        services = mapOf(
+//            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to mapOf(
+//                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19") to setOf(
+//                    UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed20"),
+//                ),
+//            ),
+//        ),
+//    )
     val writeCharacteristicsState = remember { mutableStateOf(false) }
     Characteristics(
         writeState = writeCharacteristicsState,
