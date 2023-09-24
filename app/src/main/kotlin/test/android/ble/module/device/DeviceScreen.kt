@@ -416,8 +416,12 @@ internal fun DeviceScreen(
                     }
                 }
                 is BLEGattService.Broadcast.OnWrite -> {
-                    val value = String.format("%0${broadcast.bytes.size * 2}x", BigInteger(1, broadcast.bytes))
+                    val bytes = broadcast.notification.bytes
+                    val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
                     viewModel.write(value)
+                }
+                is BLEGattService.Broadcast.OnChanged -> {
+                    // todo
                 }
                 is BLEGattService.Broadcast.OnPair -> {
                     broadcast.result.fold(

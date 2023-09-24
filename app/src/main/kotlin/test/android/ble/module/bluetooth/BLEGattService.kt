@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import test.android.ble.entity.BTDevice
+import test.android.ble.entity.BTNotification
 import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.LocException
@@ -45,11 +46,8 @@ import java.util.UUID
 internal class BLEGattService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
-        class OnWrite(
-            val service: UUID,
-            val characteristic: UUID,
-            val bytes: ByteArray,
-        ) : Broadcast
+        class OnWrite(val notification: BTNotification) : Broadcast
+        class OnChanged(val notification: BTNotification) : Broadcast
         class OnPair(val result: Result<BTDevice>) : Broadcast
         object OnDisconnect : Broadcast
     }
@@ -207,6 +205,15 @@ internal class BLEGattService : Service() {
                     // todo
                 }
             }
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+        ) {
+            Log.d(TAG, "On characteristic ${characteristic.service.uuid}/${characteristic.uuid} changed.")
+            onCharacteristicChanged(characteristic, value)
         }
     }
     private val receivers = object : BroadcastReceiver() {
@@ -449,17 +456,38 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onCharacteristicChanged(
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+    ) {
+        val state = state.value
+        if (state !is State.Connected) TODO("On characteristic changed state: $state")
+        scope.launch {
+            _broadcast.emit(
+                Broadcast.OnChanged(
+                    BTNotification(
+                        service = characteristic.service.uuid,
+                        characteristic = characteristic.uuid,
+                        bytes = value,
+                    ),
+                ),
+            )
+        }
+    }
+
     private fun onCharacteristicWrite(characteristic: BluetoothGattCharacteristic) {
         val state = state.value
-        if (state !is State.Connected) TODO()
-        if (state.type != State.Connected.Type.WRITING) TODO()
+        if (state !is State.Connected) TODO("On characteristic write state: $state")
+        if (state.type != State.Connected.Type.WRITING) TODO("On characteristic write state type: ${state.type}")
         _state.value = state.copy(type = State.Connected.Type.READY)
         scope.launch {
             _broadcast.emit(
                 Broadcast.OnWrite(
-                    service = characteristic.service.uuid,
-                    characteristic = characteristic.uuid,
-                    bytes = characteristic.value,
+                    BTNotification(
+                        service = characteristic.service.uuid,
+                        characteristic = characteristic.uuid,
+                        bytes = characteristic.value,
+                    ),
                 ),
             )
         }
