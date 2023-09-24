@@ -191,9 +191,15 @@ internal class BLEScannerService : Service() {
         private val _state = MutableStateFlow(State.STOPPED)
         val state = _state.asStateFlow()
 
-        fun start(context: Context, action: String) {
+        fun scanStart(context: Context) {
             val intent = Intent(context, BLEScannerService::class.java)
-            intent.action = action
+            intent.action = ACTION_SCAN_START
+            context.startService(intent)
+        }
+
+        fun scanStop(context: Context) {
+            val intent = Intent(context, BLEScannerService::class.java)
+            intent.action = ACTION_SCAN_STOP
             context.startService(intent)
         }
     }

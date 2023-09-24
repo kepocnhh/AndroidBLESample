@@ -105,7 +105,7 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                         .clickable {
                             when (scanState) {
                                 BLEScannerService.State.STARTED -> {
-                                    BLEScannerService.start(context, BLEScannerService.ACTION_SCAN_STOP)
+                                    BLEScannerService.scanStop(context)
                                 }
                                 else -> {
                                     // noop
@@ -156,10 +156,10 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                     .clickable(enabled = scanState != BLEScannerService.State.NONE) {
                         when (scanState) {
                             BLEScannerService.State.STARTED -> {
-                                BLEScannerService.start(context, BLEScannerService.ACTION_SCAN_STOP)
+                                BLEScannerService.scanStop(context)
                             }
                             BLEScannerService.State.STOPPED -> {
-                                BLEScannerService.start(context, BLEScannerService.ACTION_SCAN_START)
+                                BLEScannerService.scanStart(context)
                             }
                             else -> {
                                 // noop
