@@ -130,20 +130,20 @@ private fun <T : Any> ListSelect(
 
 @Composable
 private fun <T : Any> DialogListSelect(
-    dialogVisible: () -> Boolean,
+    visible: Boolean,
     onDismissRequest: () -> Unit,
     title: String,
     itemsSupplier: () -> List<T>,
     onSelect: (T) -> Unit,
 ) {
-    if (!dialogVisible()) return
+    if (!visible) return
     Dialog(onDismissRequest = onDismissRequest) {
         ListSelect(
             title = title,
-            items = itemsSupplier(),
+            items = remember { itemsSupplier() },
             onClick = {
-                onDismissRequest()
                 onSelect(it)
+                onDismissRequest()
             },
         )
     }
@@ -151,24 +151,24 @@ private fun <T : Any> DialogListSelect(
 
 @Composable
 private fun DialogEnterBytes(
-    dialogVisible: () -> Boolean,
+    visible: Boolean,
     onDismissRequest: () -> Unit,
     titlesSupplier: () -> List<String>,
     writes: Set<String>,
     onBytes: (ByteArray) -> Unit,
 ) {
-    if (!dialogVisible()) return
+    if (!visible) return
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
-        )
+        ),
     ) {
         Column(
             modifier = Modifier
                 .background(Color.White),
         ) {
-            titlesSupplier().forEach { title ->
+            remember { titlesSupplier() }.forEach { title ->
                 BasicText(
                     modifier = Modifier
                         .height(48.dp)
@@ -223,8 +223,8 @@ private fun DialogEnterBytes(
                     .height(48.dp)
                     .fillMaxWidth()
                     .onClick(enabled = parsedBytes != null) {
-                        onDismissRequest()
                         onBytes(checkNotNull(parsedBytes))
+                        onDismissRequest()
                     }
                     .wrapContentSize(),
                 text = if (parsedBytes == null) "error" else { "write ${parsedBytes.size} bytes" },
@@ -248,10 +248,8 @@ private fun Characteristics(
     val context = LocalContext.current
     val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
-    val selectedService = selectedServiceState.value
-    val selectedCharacteristic = selectedCharacteristicState.value
     DialogListSelect(
-        dialogVisible = writeState::value,
+        visible = writeState.value,
         onDismissRequest = {
             writeState.value = false
         },
@@ -264,25 +262,23 @@ private fun Characteristics(
         }
     )
     DialogListSelect(
-        dialogVisible = {
-            selectedServiceState.value != null
-        },
+        visible = selectedServiceState.value != null,
         onDismissRequest = {
             selectedServiceState.value = null
         },
         title = "Characteristic",
         itemsSupplier = {
-            gattState.services[selectedService]!!.keys.sorted()
+            gattState.services[selectedServiceState.value!!]!!.keys.sorted()
         },
         onSelect = {
-            selectedCharacteristicState.value = selectedService!! to it
+            selectedCharacteristicState.value = selectedServiceState.value!! to it
         }
     )
     DialogEnterBytes(
-        dialogVisible = { selectedCharacteristicState.value != null },
+        visible = selectedCharacteristicState.value != null,
         onDismissRequest = { selectedCharacteristicState.value = null },
         titlesSupplier = {
-            val (service, characteristic) = selectedCharacteristic!!
+            val (service, characteristic) = selectedCharacteristicState.value!!
             listOf(
                 "Service: $service",
                 "Characteristic: $characteristic",
@@ -290,7 +286,7 @@ private fun Characteristics(
         },
         writes = writes,
         onBytes = {
-            val (service, characteristic) = selectedCharacteristic!!
+            val (service, characteristic) = selectedCharacteristicState.value!!
             BLEGattService.writeCharacteristic(
                 context = context,
                 service = service,
@@ -307,13 +303,79 @@ private fun Descriptors(
     gattState: BLEGattService.State,
     writes: Set<String>,
 ) {
+    if (gattState !is BLEGattService.State.Connected) return
+    if (gattState.type != BLEGattService.State.Connected.Type.READY) return
     val context = LocalContext.current
     val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
+    val selectedService = selectedServiceState.value
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
     val selectedDescriptorState = remember { mutableStateOf<Triple<UUID, UUID, UUID>?>(null) }
-    if (writeState.value) {
-
-    }
+    DialogListSelect(
+        visible = writeState.value,
+        onDismissRequest = {
+            writeState.value = false
+        },
+        title = "Service",
+        itemsSupplier = {
+            gattState.services.keys.sorted()
+        },
+        onSelect = {
+            selectedServiceState.value = it
+        }
+    )
+    DialogListSelect(
+        visible = selectedServiceState.value != null,
+        onDismissRequest = {
+            selectedServiceState.value = null
+        },
+        title = "Characteristic",
+        itemsSupplier = {
+            gattState.services[selectedService!!]!!.keys.sorted()
+        },
+        onSelect = {
+            selectedCharacteristicState.value = selectedService!! to it
+        }
+    )
+    DialogListSelect(
+        visible = selectedCharacteristicState.value != null,
+        onDismissRequest = {
+            selectedCharacteristicState.value = null
+        },
+        title = "Descriptor",
+        itemsSupplier = {
+            val (service, characteristic) = selectedCharacteristicState.value!!
+            val characteristics = gattState.services[service]!!
+            val descriptors = characteristics[characteristic]!!
+            descriptors.sorted()
+        },
+        onSelect = {
+            val (service, characteristic) = selectedCharacteristicState.value!!
+            selectedDescriptorState.value = Triple(service, characteristic, it)
+        }
+    )
+    DialogEnterBytes(
+        visible = selectedDescriptorState.value != null,
+        onDismissRequest = { selectedDescriptorState.value = null },
+        titlesSupplier = {
+            val (service, characteristic, descriptor) = selectedDescriptorState.value!!
+            listOf(
+                "Service: $service",
+                "Characteristic: $characteristic",
+                "Descriptor: $descriptor",
+            )
+        },
+        writes = writes,
+        onBytes = {
+            val (service, characteristic, descriptor) = selectedDescriptorState.value!!
+            BLEGattService.writeDescriptor(
+                context = context,
+                service = service,
+                characteristic = characteristic,
+                descriptor = descriptor,
+                bytes = it,
+            )
+        },
+    )
 }
 
 @Composable
@@ -343,6 +405,12 @@ internal fun DeviceScreen(
     val writeCharacteristicsState = remember { mutableStateOf(false) }
     Characteristics(
         writeState = writeCharacteristicsState,
+        gattState = gattState,
+        writes = writes.orEmpty(),
+    )
+    val writeDescriptorsState = remember { mutableStateOf(false) }
+    Descriptors(
+        writeState = writeDescriptorsState,
         gattState = gattState,
         writes = writes.orEmpty(),
     )
@@ -547,6 +615,13 @@ internal fun DeviceScreen(
                         },
                         onLongClick = {
                             clearWritesDialogState.value = true
+                        },
+                    )
+                    Button(
+                        text = "write descriptor",
+                        enabled = isReady && gattState.isPaired,
+                        onClick = {
+                            writeDescriptorsState.value = true
                         },
                     )
                     val pairText = when (gattState.type) {
