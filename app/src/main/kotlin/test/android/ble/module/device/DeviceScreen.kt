@@ -127,152 +127,193 @@ private fun <T : Any> ListSelect(
     }
 }
 
+
+@Composable
+private fun <T : Any> DialogListSelect(
+    dialogVisible: () -> Boolean,
+    onDismissRequest: () -> Unit,
+    title: String,
+    itemsSupplier: () -> List<T>,
+    onSelect: (T) -> Unit,
+) {
+    if (!dialogVisible()) return
+    Dialog(onDismissRequest = onDismissRequest) {
+        ListSelect(
+            title = title,
+            items = itemsSupplier(),
+            onClick = {
+                onDismissRequest()
+                onSelect(it)
+            },
+        )
+    }
+}
+
+@Composable
+private fun DialogEnterBytes(
+    dialogVisible: () -> Boolean,
+    onDismissRequest: () -> Unit,
+    titlesSupplier: () -> List<String>,
+    writes: Set<String>,
+    onBytes: (ByteArray) -> Unit,
+) {
+    if (!dialogVisible()) return
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .background(Color.White),
+        ) {
+            titlesSupplier().forEach { title ->
+                BasicText(
+                    modifier = Modifier
+                        .height(48.dp)
+                        .fillMaxWidth()
+                        .wrapContentHeight(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    text = title,
+                )
+            }
+            Spacer(modifier = Modifier
+                .height(1.dp)
+                .fillMaxWidth()
+                .background(Color.Black))
+            val stringBytesState = remember { mutableStateOf(TextFieldValue()) }
+            val parsedBytes = runCatching {
+                BigInteger(stringBytesState.value.text, 16).toByteArray()
+            }.getOrNull()
+            AutoCompleteTextField(
+                value = stringBytesState.value,
+                onValueChange = {
+                    stringBytesState.value = it
+                },
+                values = writes,
+                showTips = parsedBytes != null,
+            )
+            Spacer(modifier = Modifier
+                .height(1.dp)
+                .fillMaxWidth()
+                .background(Color.Black))
+            BasicText(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentSize(),
+                text = if (parsedBytes == null) "" else {
+                    parsedBytes
+                        .withIndex()
+                        .groupBy(keySelector = { it.index / 4 }, valueTransform = { it.value })
+                        .values
+                        .joinToString(separator = "\n") { list ->
+                            list.joinToString(separator = " ") {
+                                String.format("%03d", it.toInt() and 0xFF)
+                            }
+                        }
+                }, // todo
+                style = TextStyle(
+                    fontSize = 14.sp,
+                ),
+            )
+            BasicText(
+                modifier = Modifier
+                    .height(48.dp)
+                    .fillMaxWidth()
+                    .onClick(enabled = parsedBytes != null) {
+                        onDismissRequest()
+                        onBytes(checkNotNull(parsedBytes))
+                    }
+                    .wrapContentSize(),
+                text = if (parsedBytes == null) "error" else { "write ${parsedBytes.size} bytes" },
+                style = TextStyle(
+                    fontSize = 14.sp,
+                    color = if (parsedBytes == null) Color.Red else Color.Black,
+                ),
+            )
+        }
+    }
+}
+
 @Composable
 private fun Characteristics(
-    selectServiceDialogState: MutableState<Boolean>,
+    writeState: MutableState<Boolean>,
+    gattState: BLEGattService.State,
+    writes: Set<String>,
+) {
+    if (gattState !is BLEGattService.State.Connected) return
+    if (gattState.type != BLEGattService.State.Connected.Type.READY) return
+    val context = LocalContext.current
+    val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
+    val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
+    val selectedService = selectedServiceState.value
+    val selectedCharacteristic = selectedCharacteristicState.value
+    DialogListSelect(
+        dialogVisible = writeState::value,
+        onDismissRequest = {
+            writeState.value = false
+        },
+        title = "Service",
+        itemsSupplier = {
+            gattState.services.keys.sorted()
+        },
+        onSelect = {
+            selectedServiceState.value = it
+        }
+    )
+    DialogListSelect(
+        dialogVisible = {
+            selectedServiceState.value != null
+        },
+        onDismissRequest = {
+            selectedServiceState.value = null
+        },
+        title = "Characteristic",
+        itemsSupplier = {
+            gattState.services[selectedService]!!.keys.sorted()
+        },
+        onSelect = {
+            selectedCharacteristicState.value = selectedService!! to it
+        }
+    )
+    DialogEnterBytes(
+        dialogVisible = { selectedCharacteristicState.value != null },
+        onDismissRequest = { selectedCharacteristicState.value = null },
+        titlesSupplier = {
+            val (service, characteristic) = selectedCharacteristic!!
+            listOf(
+                "Service: $service",
+                "Characteristic: $characteristic",
+            )
+        },
+        writes = writes,
+        onBytes = {
+            val (service, characteristic) = selectedCharacteristic!!
+            BLEGattService.writeCharacteristic(
+                context = context,
+                service = service,
+                characteristic = characteristic,
+                bytes = it,
+            )
+        },
+    )
+}
+
+@Composable
+private fun Descriptors(
+    writeState: MutableState<Boolean>,
     gattState: BLEGattService.State,
     writes: Set<String>,
 ) {
     val context = LocalContext.current
     val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
-    val selectedService = selectedServiceState.value
-    val selectedCharacteristic = selectedCharacteristicState.value
-    if (selectServiceDialogState.value) {
-        Dialog(
-            onDismissRequest = {
-                selectServiceDialogState.value = false
-            },
-        ) {
-            check(gattState is BLEGattService.State.Connected)
-            check(gattState.type == BLEGattService.State.Connected.Type.READY)
-            ListSelect(
-                title = "Service",
-                items = gattState.services.keys.sorted(),
-                onClick = {
-                    selectServiceDialogState.value = false
-                    selectedServiceState.value = it
-                },
-            )
-        }
-    } else if (selectedService != null) {
-        Dialog(
-            onDismissRequest = {
-                selectedServiceState.value = null
-            },
-        ) {
-            check(gattState is BLEGattService.State.Connected)
-            check(gattState.type == BLEGattService.State.Connected.Type.READY)
-            ListSelect(
-                title = "Characteristic",
-                items = gattState.services[selectedService]!!.keys.sorted(),
-                onClick = {
-                    selectedServiceState.value = null
-                    selectedCharacteristicState.value = selectedService to it
-                },
-            )
-        }
-    } else if (selectedCharacteristic != null) {
-        Dialog(
-            onDismissRequest = {
-                selectedCharacteristicState.value = null
-            },
-            properties = DialogProperties(
-                usePlatformDefaultWidth = false,
-            )
-        ) {
-            check(gattState is BLEGattService.State.Connected)
-            check(gattState.type == BLEGattService.State.Connected.Type.READY)
-            val (service, characteristic) = selectedCharacteristic
-            Column(
-                modifier = Modifier
-                    .background(Color.White),
-            ) {
-                BasicText(
-                    modifier = Modifier
-                        .height(48.dp)
-                        .fillMaxWidth()
-                        .wrapContentHeight(),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    text = "Service: $service",
-                )
-                BasicText(
-                    modifier = Modifier
-                        .height(48.dp)
-                        .fillMaxWidth()
-                        .wrapContentHeight(),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    text = "Characteristic: $characteristic",
-                )
-                Spacer(modifier = Modifier
-                    .height(1.dp)
-                    .fillMaxWidth()
-                    .background(Color.Black))
-                val stringBytesState = remember { mutableStateOf(TextFieldValue()) }
-                val parsedBytes = runCatching {
-                    BigInteger(stringBytesState.value.text, 16).toByteArray()
-                }.getOrNull()
-                AutoCompleteTextField(
-                    value = stringBytesState.value,
-                    onValueChange = {
-                        stringBytesState.value = it
-                    },
-                    values = writes,
-                    showTips = parsedBytes != null,
-                )
-                Spacer(modifier = Modifier
-                    .height(1.dp)
-                    .fillMaxWidth()
-                    .background(Color.Black))
-                BasicText(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .wrapContentSize(),
-                    text = if (parsedBytes == null) "" else {
-                        parsedBytes
-                            .withIndex()
-                            .groupBy(keySelector = { it.index / 4 }, valueTransform = { it.value })
-                            .values
-                            .joinToString(separator = "\n") { list ->
-                                list.joinToString(separator = " ") {
-                                    String.format("%03d", it.toInt() and 0xFF)
-                                }
-                            }
-                    }, // todo
-                    style = TextStyle(
-                        fontSize = 14.sp,
-                    ),
-                )
-                BasicText(
-                    modifier = Modifier
-                        .height(48.dp)
-                        .fillMaxWidth()
-                        .onClick(enabled = parsedBytes != null) {
-                            selectedCharacteristicState.value = null
-                            BLEGattService.writeCharacteristic(
-                                context = context,
-                                service = service,
-                                characteristic = characteristic,
-                                bytes = checkNotNull(parsedBytes),
-                            )
-                        }
-                        .wrapContentSize(),
-                    text = if (parsedBytes == null) "error" else { "write ${parsedBytes.size} bytes" },
-                    style = TextStyle(
-                        fontSize = 14.sp,
-                        color = if (parsedBytes == null) Color.Red else Color.Black,
-                    ),
-                )
-            }
-        }
+    val selectedDescriptorState = remember { mutableStateOf<Triple<UUID, UUID, UUID>?>(null) }
+    if (writeState.value) {
+
     }
-}
-
-@Composable
-private fun Descriptors() {
-
 }
 
 @Composable
@@ -286,20 +327,22 @@ internal fun DeviceScreen(
     val viewModel = App.viewModel<DeviceViewModel>()
     val writes by viewModel.writes.collectAsState()
     if (writes == null) viewModel.requestWrites()
-    val gattState = BLEGattService.state.collectAsState().value
-//    val gattState: BLEGattService.State = BLEGattService.State.Connected(
-//        address = address,
-//        type = BLEGattService.State.Connected.Type.READY,
-//        isPaired = false,
-//        services = mapOf(
-//            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to setOf(
-//                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19"),
-//            ),
-//        ),
-//    )
-    val selectServiceDialogState = remember { mutableStateOf(false) }
+//    val gattState = BLEGattService.state.collectAsState().value
+    val gattState: BLEGattService.State = BLEGattService.State.Connected(
+        address = address,
+        type = BLEGattService.State.Connected.Type.READY,
+        isPaired = true,
+        services = mapOf(
+            UUID.fromString("00000000-cc7a-482a-984a-7f2ed5b3e58f") to mapOf(
+                UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed19") to setOf(
+                    UUID.fromString("00000000-8e22-4541-9d4c-21edae82ed20"),
+                ),
+            ),
+        ),
+    )
+    val writeCharacteristicsState = remember { mutableStateOf(false) }
     Characteristics(
-        selectServiceDialogState = selectServiceDialogState,
+        writeState = writeCharacteristicsState,
         gattState = gattState,
         writes = writes.orEmpty(),
     )
@@ -500,7 +543,7 @@ internal fun DeviceScreen(
                         text = "write characteristic",
                         enabled = isReady && gattState.isPaired,
                         onClick = {
-                            selectServiceDialogState.value = true
+                            writeCharacteristicsState.value = true
                         },
                         onLongClick = {
                             clearWritesDialogState.value = true
