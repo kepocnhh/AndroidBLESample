@@ -193,6 +193,16 @@ internal class BLEGattService : Service() {
             }
         }
 
+        @Deprecated(message = "api 33")
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?,
+        ) {
+            if (gatt == null) return
+            if (characteristic == null) return
+            Log.i(TAG, "On characteristic ${characteristic.service.uuid}/${characteristic.uuid} changed.")
+        }
+
         override fun onCharacteristicWrite(
             gatt: BluetoothGatt?,
             characteristic: BluetoothGattCharacteristic?,
