@@ -45,7 +45,7 @@ internal class BLEScannerService : Service() {
     private val scope = CoroutineScope(Dispatchers.Main + job)
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            println("$TAG: on scan result: callback $callbackType result $result")
+            Log.d(TAG, "on scan result: callback $callbackType result $result")
             if (result == null) return
             val scanRecord = result.scanRecord ?: return
             val device = result.device ?: return
@@ -62,12 +62,12 @@ internal class BLEScannerService : Service() {
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>?) {
-            println("$TAG: on batch scan results: $results")
+            Log.d(TAG, "on batch scan results: $results")
             // todo
         }
 
         override fun onScanFailed(errorCode: Int) {
-            println("$TAG: error: $errorCode")
+            Log.w(TAG, "error: $errorCode")
             // todo
         }
     }
