@@ -653,6 +653,9 @@ internal fun DeviceScreen(
                 is BLEGattService.Profile.Broadcast.OnServicesDiscovered -> {
                     // todo
                 }
+                is BLEGattService.Profile.Broadcast.OnChangeCharacteristic -> {
+                    // todo
+                }
             }
         }
     }

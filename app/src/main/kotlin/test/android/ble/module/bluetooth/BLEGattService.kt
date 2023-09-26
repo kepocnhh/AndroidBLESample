@@ -200,7 +200,8 @@ internal class BLEGattService : Service() {
         ) {
             if (gatt == null) return
             if (characteristic == null) return
-            Log.i(TAG, "On characteristic ${characteristic.service.uuid}/${characteristic.uuid} changed.")
+            Log.i(TAG, "On characteristic DEPRECATED ${characteristic.service.uuid}/${characteristic.uuid} changed.")
+            onCharacteristicChanged(characteristic, value = characteristic.value.copyOf())
         }
 
         override fun onCharacteristicWrite(
@@ -256,7 +257,7 @@ internal class BLEGattService : Service() {
             value: ByteArray,
         ) {
             Log.d(TAG, "On characteristic ${characteristic.service.uuid}/${characteristic.uuid} changed.")
-            onCharacteristicChanged(characteristic, value)
+            onCharacteristicChanged(characteristic, value = value)
         }
 
         override fun onDescriptorWrite(
@@ -547,17 +548,14 @@ internal class BLEGattService : Service() {
     ) {
         val state = state.value
         if (state !is State.Connected) TODO("On characteristic changed state: $state")
-        // todo
         scope.launch {
-//            _broadcast.emit(
-//                Broadcast.OnChanged(
-//                    BTNotification(
-//                        service = characteristic.service.uuid,
-//                        characteristic = characteristic.uuid,
-//                        bytes = value,
-//                    ),
-//                ),
-//            )
+            _profileBroadcast.emit(
+                Profile.Broadcast.OnChangeCharacteristic(
+                    service = characteristic.service.uuid,
+                    characteristic = characteristic.uuid,
+                    bytes = value,
+                ),
+            )
         }
     }
 
@@ -1330,6 +1328,11 @@ internal class BLEGattService : Service() {
                 val bytes: ByteArray,
             ) : Broadcast
             class OnReadCharacteristic(
+                val service: UUID,
+                val characteristic: UUID,
+                val bytes: ByteArray,
+            ) : Broadcast
+            class OnChangeCharacteristic(
                 val service: UUID,
                 val characteristic: UUID,
                 val bytes: ByteArray,
