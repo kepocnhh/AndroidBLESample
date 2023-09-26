@@ -43,7 +43,7 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
     val TAG = "[Scanner|Screen]"
     val context = LocalContext.current
     val insets = LocalView.current.rootWindowInsets.toPaddings()
-    val scanState by BLEScannerService.scanState.collectAsState(BLEScannerService.ScanState.NONE)
+    val scanState by BLEScannerService.state.collectAsState()
     val devicesState = remember { mutableStateOf(listOf<BTDevice>()) }
     LaunchedEffect(Unit) {
         BLEScannerService.broadcast.collect { broadcast ->
@@ -104,8 +104,8 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                         .height(64.dp)
                         .clickable {
                             when (scanState) {
-                                BLEScannerService.ScanState.STARTED -> {
-                                    BLEScannerService.start(context, BLEScannerService.ACTION_SCAN_STOP)
+                                BLEScannerService.State.STARTED -> {
+                                    BLEScannerService.scanStop(context)
                                 }
                                 else -> {
                                     // noop
@@ -140,9 +140,9 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
             }
         }
         val text = when (scanState) {
-            BLEScannerService.ScanState.NONE -> "..."
-            BLEScannerService.ScanState.STARTED -> "stop"
-            BLEScannerService.ScanState.STOPPED -> "start"
+            BLEScannerService.State.NONE -> "..."
+            BLEScannerService.State.STARTED -> "stop"
+            BLEScannerService.State.STOPPED -> "start"
         }
         Row(
             modifier = Modifier
@@ -153,13 +153,13 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                 modifier = Modifier
                     .fillMaxHeight()
                     .weight(1f)
-                    .clickable(enabled = scanState != BLEScannerService.ScanState.NONE) {
+                    .clickable(enabled = scanState != BLEScannerService.State.NONE) {
                         when (scanState) {
-                            BLEScannerService.ScanState.STARTED -> {
-                                BLEScannerService.start(context, BLEScannerService.ACTION_SCAN_STOP)
+                            BLEScannerService.State.STARTED -> {
+                                BLEScannerService.scanStop(context)
                             }
-                            BLEScannerService.ScanState.STOPPED -> {
-                                BLEScannerService.start(context, BLEScannerService.ACTION_SCAN_START)
+                            BLEScannerService.State.STOPPED -> {
+                                BLEScannerService.scanStart(context)
                             }
                             else -> {
                                 // noop

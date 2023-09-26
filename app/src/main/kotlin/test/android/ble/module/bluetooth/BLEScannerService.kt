@@ -29,10 +29,13 @@ import test.android.ble.util.android.scanStop
 internal class BLEScannerService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
-        class OnBTDevice(val device: BTDevice) : Broadcast
+        class OnBTDevice(
+            val device: BTDevice,
+            val rawData: ByteArray,
+        ) : Broadcast
     }
 
-    enum class ScanState {
+    enum class State {
         NONE,
         STARTED,
         STOPPED,
@@ -49,11 +52,11 @@ internal class BLEScannerService : Service() {
             val btDevice = BTDevice(
                 address = device.address ?: return,
                 name = device.name ?: return,
-                rawData = scanRecord.bytes ?: return,
             )
+            val rawData = scanRecord.bytes ?: return
             scope.launch {
                 _broadcast.emit(
-                    Broadcast.OnBTDevice(btDevice),
+                    Broadcast.OnBTDevice(btDevice, rawData = rawData),
                 )
             }
         }
@@ -92,7 +95,7 @@ internal class BLEScannerService : Service() {
                     val isLocationEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
                     Log.d(TAG, "isLocationEnabled: $isLocationEnabled")
                     if (!isLocationEnabled) {
-                        if (scanState.value == ScanState.STARTED) {
+                        if (state.value == State.STARTED) {
                             onScanStop()
                         }
                     }
@@ -111,7 +114,7 @@ internal class BLEScannerService : Service() {
     private fun onScanStart() {
         val service: Service = this
         scope.launch {
-            _scanState.value = ScanState.NONE
+            _state.value = State.NONE
             runCatching {
                 withContext(Dispatchers.Default) {
                     scanStart(callback)
@@ -131,11 +134,11 @@ internal class BLEScannerService : Service() {
                         it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
                     }
                     registerReceiver(receivers, filter)
-                    _scanState.value = ScanState.STARTED
+                    _state.value = State.STARTED
                 },
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
-                    _scanState.value = ScanState.STOPPED
+                    _state.value = State.STOPPED
                 },
             )
         }
@@ -143,18 +146,18 @@ internal class BLEScannerService : Service() {
 
     private fun onScanStop() {
         scope.launch {
-            _scanState.value = ScanState.NONE
+            _state.value = State.NONE
             runCatching {
                 withContext(Dispatchers.Default) {
                     scanStop(callback)
                 }
             }.fold(
                 onSuccess = {
-                    _scanState.value = ScanState.STOPPED
+                    _state.value = State.STOPPED
                 },
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
-                    _scanState.value = ScanState.STOPPED
+                    _state.value = State.STOPPED
                 },
             )
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -185,12 +188,18 @@ internal class BLEScannerService : Service() {
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
         val broadcast = _broadcast.asSharedFlow()
-        private val _scanState = MutableStateFlow(ScanState.STOPPED)
-        val scanState = _scanState.asStateFlow()
+        private val _state = MutableStateFlow(State.STOPPED)
+        val state = _state.asStateFlow()
 
-        fun start(context: Context, action: String) {
+        fun scanStart(context: Context) {
             val intent = Intent(context, BLEScannerService::class.java)
-            intent.action = action
+            intent.action = ACTION_SCAN_START
+            context.startService(intent)
+        }
+
+        fun scanStop(context: Context) {
+            val intent = Intent(context, BLEScannerService::class.java)
+            intent.action = ACTION_SCAN_STOP
             context.startService(intent)
         }
     }

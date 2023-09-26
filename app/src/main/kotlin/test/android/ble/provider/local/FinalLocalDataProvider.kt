@@ -16,4 +16,15 @@ internal class FinalLocalDataProvider(context: Context) : LocalDataProvider {
                 .putString("address", value)
                 .commit()
         }
+
+    override var writes: Set<String>
+        get() {
+            return preferences.getStringSet("writes", emptySet()).orEmpty()
+        }
+        set(value) {
+            preferences
+                .edit()
+                .putStringSet("writes", value)
+                .commit()
+        }
 }
