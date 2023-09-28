@@ -983,19 +983,15 @@ internal class BLEGattService : Service() {
     }
 
     private val characteristicsToWrite: Queue<Triple<UUID, UUID, ByteArray>> = ConcurrentLinkedQueue()
-    private fun writeCharacteristics() {
+    private fun writeCharacteristics(
+        service: UUID,
+        characteristic: UUID,
+        bytes: ByteArray,
+    ) {
         val state = state.value
-        if (state !is State.Connected) TODO("write characteristics state: $state")
-        val (service, characteristic, bytes) = characteristicsToWrite.poll() ?: return
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                _state.value = state.copy(type = State.Connected.Type.WRITING)
-            }
-            State.Connected.Type.WRITING -> {
-                // noop
-            }
-            else -> TODO("write characteristics state type: ${state.type}")
-        }
+        if (state !is State.Connected) TODO("write $service/$characteristic state: $state")
+        if (state.type != State.Connected.Type.WRITING) TODO("write $service/$characteristic state type: ${state.type}")
+        Log.d(TAG, "on write $service/$characteristic...")
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
@@ -1014,6 +1010,28 @@ internal class BLEGattService : Service() {
                     TODO("GATT write C error: $it!")
                 },
             )
+        }
+    }
+    private fun writeCharacteristics() {
+        val state = state.value
+        if (state !is State.Connected) TODO("write characteristics state: $state")
+        val triple = characteristicsToWrite.poll()
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                if (triple == null) return
+                _state.value = state.copy(type = State.Connected.Type.WRITING)
+                val (service, characteristic, bytes) = triple
+                writeCharacteristics(service = service, characteristic = characteristic, bytes = bytes)
+            }
+            State.Connected.Type.WRITING -> {
+                if (triple == null) {
+                    _state.value = state.copy(type = State.Connected.Type.READY)
+                    return
+                }
+                val (service, characteristic, bytes) = triple
+                writeCharacteristics(service = service, characteristic = characteristic, bytes = bytes)
+            }
+            else -> TODO("write characteristics state type: ${state.type}")
         }
     }
 
