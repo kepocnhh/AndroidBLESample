@@ -52,7 +52,7 @@ internal class BLEGattService : Service() {
         class OnError(val error: Throwable) : Broadcast
         class OnPair(val result: Result<BTDevice>) : Broadcast
         object OnDisconnect : Broadcast
-        object OnConnect : Broadcast
+        class OnConnect(val state: State.Connected) : Broadcast
     }
 
     sealed interface State {
@@ -1287,7 +1287,7 @@ internal class BLEGattService : Service() {
                 }
                 registerReceiver(receiversConnected, filter)
                 scope.launch {
-                    _broadcast.emit(Broadcast.OnConnect)
+                    _broadcast.emit(Broadcast.OnConnect(newState))
                 }
             }
         }

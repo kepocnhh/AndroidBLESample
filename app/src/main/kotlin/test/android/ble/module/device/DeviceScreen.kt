@@ -631,7 +631,7 @@ internal fun DeviceScreen(
                 BLEGattService.Broadcast.OnDisconnect -> {
                     context.showToast("Disconnected.")
                 }
-                BLEGattService.Broadcast.OnConnect -> {
+                is BLEGattService.Broadcast.OnConnect -> {
                     context.showToast("Connected.")
                 }
             }
