@@ -50,6 +50,7 @@ internal class BLEGattService : Service() {
         class OnError(val error: Throwable) : Broadcast
         class OnPair(val result: Result<BTDevice>) : Broadcast
         object OnDisconnect : Broadcast
+        object OnConnect : Broadcast
     }
 
     sealed interface State {
@@ -1259,6 +1260,9 @@ internal class BLEGattService : Service() {
                     it.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
                 }
                 registerReceiver(receiversConnected, filter)
+                scope.launch {
+                    _broadcast.emit(Broadcast.OnConnect)
+                }
             }
         }
         if (oldState is State.Disconnected) {
@@ -1429,6 +1433,7 @@ internal class BLEGattService : Service() {
             context.startService(intent)
         }
 
+        @JvmStatic
         fun disconnect(context: Context) {
             val intent = intent(context, Action.DISCONNECT)
             context.startService(intent)
@@ -1444,6 +1449,7 @@ internal class BLEGattService : Service() {
             context.startService(intent)
         }
 
+        @JvmStatic
         fun pair(context: Context, pin: String) {
             val intent = intent(context, Action.PAIR)
             intent.putExtra("pin", pin)
