@@ -43,7 +43,9 @@ import test.android.ble.util.android.removeBond
 import test.android.ble.util.android.requireBTAdapter
 import test.android.ble.util.android.scanStart
 import test.android.ble.util.android.scanStop
+import java.util.Queue
 import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedQueue
 
 internal class BLEGattService : Service() {
     sealed interface Broadcast {
@@ -578,9 +580,9 @@ internal class BLEGattService : Service() {
 
     private fun onCharacteristicWrite(characteristic: BluetoothGattCharacteristic) {
         val state = state.value
-        if (state !is State.Connected) TODO("On characteristic write state: $state")
-        if (state.type != State.Connected.Type.WRITING) TODO("On characteristic write state type: ${state.type}")
-        _state.value = state.copy(type = State.Connected.Type.READY)
+        if (state !is State.Connected) TODO("on characteristic write state: $state")
+        if (state.type != State.Connected.Type.WRITING) TODO("on characteristic write state type: ${state.type}")
+        writeCharacteristics()
         scope.launch {
             _profileBroadcast.emit(
                 Profile.Broadcast.OnWriteCharacteristic(
@@ -980,16 +982,20 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onWriteCharacteristic(
-        service: UUID,
-        characteristic: UUID,
-        bytes: ByteArray,
-    ) {
-        Log.d(TAG, "on write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
+    private val characteristicsToWrite: Queue<Triple<UUID, UUID, ByteArray>> = ConcurrentLinkedQueue()
+    private fun writeCharacteristics() {
         val state = state.value
-        if (state !is State.Connected) TODO("Write C state: $state")
-        if (state.type != State.Connected.Type.READY) TODO("Write C state type: ${state.type}")
-        _state.value = state.copy(type = State.Connected.Type.WRITING)
+        if (state !is State.Connected) TODO("write characteristics state: $state")
+        val (service, characteristic, bytes) = characteristicsToWrite.poll() ?: return
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                _state.value = state.copy(type = State.Connected.Type.WRITING)
+            }
+            State.Connected.Type.WRITING -> {
+                // noop
+            }
+            else -> TODO("write characteristics state type: ${state.type}")
+        }
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
@@ -1008,6 +1014,26 @@ internal class BLEGattService : Service() {
                     TODO("GATT write C error: $it!")
                 },
             )
+        }
+    }
+
+    private fun onWriteCharacteristic(
+        service: UUID,
+        characteristic: UUID,
+        bytes: ByteArray,
+    ) {
+        Log.d(TAG, "On write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on write $service/$characteristic state: $state")
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                characteristicsToWrite.add(Triple(service, characteristic, bytes))
+                writeCharacteristics()
+            }
+            State.Connected.Type.WRITING -> {
+                characteristicsToWrite.add(Triple(service, characteristic, bytes))
+            }
+            else -> TODO("on write $service/$characteristic state type: ${state.type}")
         }
     }
 
