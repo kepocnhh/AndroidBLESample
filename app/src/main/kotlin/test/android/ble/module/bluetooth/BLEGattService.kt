@@ -766,7 +766,7 @@ internal class BLEGattService : Service() {
         )
         runCatching {
             withContext(Dispatchers.Default) {
-                scanStart(scanCallback)
+                scanStart(scanCallback, scanSettings = TODO())
             }
         }.fold(
             onSuccess = {

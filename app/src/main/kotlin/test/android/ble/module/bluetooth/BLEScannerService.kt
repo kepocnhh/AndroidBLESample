@@ -4,6 +4,7 @@ import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -11,6 +12,7 @@ import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
+import android.os.Parcelable
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -111,13 +113,13 @@ internal class BLEScannerService : Service() {
         }
     }
 
-    private fun onScanStart() {
+    private fun onScanStart(scanSettings: ScanSettings) {
         val service: Service = this
         scope.launch {
             _state.value = State.NONE
             runCatching {
                 withContext(Dispatchers.Default) {
-                    scanStart(callback)
+                    scanStart(callback, scanSettings)
                 }
             }.fold(
                 onSuccess = {
@@ -167,7 +169,10 @@ internal class BLEScannerService : Service() {
 
     private fun onStartCommand(intent: Intent) {
         when (intent.action) {
-            ACTION_SCAN_START -> onScanStart()
+            ACTION_SCAN_START -> {
+                val scanSettings = intent.getParcelableExtra("scanSettings") ?: ScanSettings.Builder().build()
+                onScanStart(scanSettings = scanSettings)
+            }
             ACTION_SCAN_STOP -> onScanStop()
         }
     }
@@ -191,9 +196,10 @@ internal class BLEScannerService : Service() {
         private val _state = MutableStateFlow(State.STOPPED)
         val state = _state.asStateFlow()
 
-        fun scanStart(context: Context) {
+        fun scanStart(context: Context, scanSettings: ScanSettings) {
             val intent = Intent(context, BLEScannerService::class.java)
             intent.action = ACTION_SCAN_START
+            intent.putExtra("scanSettings", scanSettings as Parcelable)
             context.startService(intent)
         }
 
