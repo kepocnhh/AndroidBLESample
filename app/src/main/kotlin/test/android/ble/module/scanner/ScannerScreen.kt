@@ -88,7 +88,7 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                 is BLEScannerService.Broadcast.OnBTDevice -> {
                     val device = broadcast.device
                     if (devicesState.value.none { it.address == device.address }) {
-                        println("[Scanner]: device: $device")
+                        Log.i(TAG, "device: $device")
                         devicesState.value = devicesState.value + device
                     }
                 }
