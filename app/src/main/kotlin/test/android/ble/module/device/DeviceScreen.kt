@@ -441,6 +441,55 @@ private fun Descriptors(
 }
 
 @Composable
+internal fun LastChanged(
+    modifier: Modifier,
+    service: UUID,
+    characteristic: UUID,
+    bytes: ByteArray,
+) {
+    Column(modifier = modifier) {
+        BasicText(
+            modifier = Modifier
+                .fillMaxWidth(),
+            text = service.toString(),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = TextStyle(
+                color = Color.Gray,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            ),
+        )
+        BasicText(
+            modifier = Modifier
+                .fillMaxWidth(),
+            text = characteristic.toString(),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = TextStyle(
+                color = Color.Gray,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            ),
+        )
+        BasicText(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp)
+                .wrapContentHeight(),
+            text = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes)),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = TextStyle(
+                color = Color.Black,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            ),
+        )
+    }
+}
+
+@Composable
 internal fun DeviceScreen(
     address: String,
     onForget: () -> Unit,
@@ -579,6 +628,7 @@ internal fun DeviceScreen(
             }
         }
     }
+    val lastChangedState = remember { mutableStateOf<Triple<UUID, UUID, ByteArray>?>(null) }
     LaunchedEffect(Unit) {
         BLEGattService.broadcast.collect { broadcast ->
             when (broadcast) {
@@ -657,12 +707,12 @@ internal fun DeviceScreen(
                     // todo
                 }
                 is BLEGattService.Profile.Broadcast.OnChangeCharacteristic -> {
-                    // todo
+                    lastChangedState.value = Triple(broadcast.service, broadcast.characteristic, broadcast.bytes)
                 }
             }
         }
     }
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
@@ -681,9 +731,23 @@ internal fun DeviceScreen(
                 fontFamily = FontFamily.Monospace,
             ),
         )
+        val lastChanged = lastChangedState.value
+        if (lastChanged != null) {
+            val (service, characteristic, bytes) = lastChanged
+            LastChanged(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, end = 8.dp),
+                service = service,
+                characteristic = characteristic,
+                bytes = bytes,
+            )
+        }
+        Spacer(
+            modifier = Modifier.weight(1f),
+        )
         Column(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
                 .fillMaxWidth(),
         ) {
             when (gattState) {
