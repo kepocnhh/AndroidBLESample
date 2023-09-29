@@ -33,6 +33,7 @@ import kotlinx.coroutines.withContext
 import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BTException
+import test.android.ble.util.android.GattException
 import test.android.ble.util.android.GattUtil
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.PairException
@@ -43,13 +44,16 @@ import test.android.ble.util.android.removeBond
 import test.android.ble.util.android.requireBTAdapter
 import test.android.ble.util.android.scanStart
 import test.android.ble.util.android.scanStop
+import java.util.Queue
 import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedQueue
 
 internal class BLEGattService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
         class OnPair(val result: Result<BTDevice>) : Broadcast
         object OnDisconnect : Broadcast
+        class OnConnect(val state: State.Connected) : Broadcast
     }
 
     sealed interface State {
@@ -375,26 +379,36 @@ internal class BLEGattService : Service() {
             if (intent != null) onReceive(intent)
         }
     }
-    private val receiversConnected = object : BroadcastReceiver() {
+    private val receiversPairing = object : BroadcastReceiver() {
         private fun onReceive(intent: Intent) {
             when (intent.action) {
                 BluetoothDevice.ACTION_PAIRING_REQUEST -> {
                     val variant = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, BluetoothDevice.ERROR)
                     when (variant) {
                         BluetoothDevice.PAIRING_VARIANT_PIN -> {
+                            val state = state.value
+                            if (state !is State.Connected) return
                             val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-                                ?: TODO("No device!")
-                            val pin = pin
-                            if (pin != null) {
-                                this@BLEGattService.pin = pin
-                                onPINPairingRequest(address = device.address, pin = pin)
-                            }
-                        }
-                        else -> {
-                            // noop
+                                ?: TODO("ACTION_PAIRING_REQUEST/PAIRING_VARIANT_PIN: No device!")
+                            if (state.address != device.address) return
+                            val pin = pin ?: return
+                            if (state.type != State.Connected.Type.PAIRING) TODO("ACTION_PAIRING_REQUEST/PAIRING_VARIANT_PIN: state type: ${state.type}!")
+                            abortBroadcast()
+                            this@BLEGattService.pin = null
+                            onPINPairingRequest(address = device.address, pin = pin)
                         }
                     }
                 }
+            }
+        }
+
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent != null) onReceive(intent)
+        }
+    }
+    private val receiversConnected = object : BroadcastReceiver() {
+        private fun onReceive(intent: Intent) {
+            when (intent.action) {
                 BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
                     val oldState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
                     val newState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
@@ -423,6 +437,7 @@ internal class BLEGattService : Service() {
                                         val UNBOND_REASON_AUTH_FAILED = 1
                                         val UNBOND_REASON_AUTH_REJECTED = 2
                                         val UNBOND_REASON_AUTH_CANCELED = 3
+                                        val UNBOND_REASON_REMOVED = 9
                                         val error = when (reason) {
                                             UNBOND_REASON_AUTH_FAILED -> {
                                                 Log.w(TAG, "No pairing because auth failed!")
@@ -436,11 +451,19 @@ internal class BLEGattService : Service() {
                                                 Log.w(TAG, "No pairing because auth canceled!")
                                                 PairException.Error.CANCELED
                                             }
-                                            else -> null
+                                            UNBOND_REASON_REMOVED -> {
+                                                Log.w(TAG, "No pairing because removed!")
+                                                null // todo
+                                            }
+                                            else -> {
+                                                Log.w(TAG, "No pairing because unknown error! Code: $reason")
+                                                null
+                                            }
                                         }
-                                        onBondingFailed(device, error)
+                                        onBondingFailed(address = device.address, error)
                                     } else {
-                                        onBondingFailed(device, null)
+                                        Log.w(TAG, "No pairing with unknown reason!")
+                                        onBondingFailed(address = device.address, null)
                                     }
                                 }
                                 else -> TODO("State $oldState -> $newState unsupported!")
@@ -484,11 +507,11 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onBondingFailed(device: BluetoothDevice, error: PairException.Error?) {
+    private fun onBondingFailed(address: String, error: PairException.Error?) {
         val state = state.value
         if (state !is State.Connected) TODO("State: $state!")
         if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
-        if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
+        if (address != state.address) TODO("Expected ${state.address}, actual $address!")
         _state.value = state.copy(type = State.Connected.Type.READY, isPaired = false)
         scope.launch {
             _broadcast.emit(
@@ -533,10 +556,12 @@ internal class BLEGattService : Service() {
                 if (!device.setPin(pin.toByteArray())) TODO("Set pin error!")
             }.fold(
                 onSuccess = {
-                            // noop
+                    // noop
                 },
                 onFailure = {
                     Log.w(TAG, "PIN pairing request error: $it")
+                    onBondingFailed(address, null)
+                    onDisconnectToSearch()
                 },
             )
         }
@@ -547,7 +572,10 @@ internal class BLEGattService : Service() {
         value: ByteArray,
     ) {
         val state = state.value
-        if (state !is State.Connected) TODO("On characteristic changed state: $state")
+        if (state !is State.Connected) {
+            Log.d(TAG, "The changes are no longer relevant. Disconnected.")
+            return
+        }
         scope.launch {
             _profileBroadcast.emit(
                 Profile.Broadcast.OnChangeCharacteristic(
@@ -577,9 +605,12 @@ internal class BLEGattService : Service() {
 
     private fun onCharacteristicWrite(characteristic: BluetoothGattCharacteristic) {
         val state = state.value
-        if (state !is State.Connected) TODO("On characteristic write state: $state")
-        if (state.type != State.Connected.Type.WRITING) TODO("On characteristic write state type: ${state.type}")
-        _state.value = state.copy(type = State.Connected.Type.READY)
+        if (state !is State.Connected) {
+            Log.d(TAG, "The writing results are no longer relevant. Disconnected.")
+            return
+        }
+        if (state.type != State.Connected.Type.WRITING) TODO("on characteristic write state type: ${state.type}")
+        writeCharacteristics()
         scope.launch {
             _profileBroadcast.emit(
                 Profile.Broadcast.OnWriteCharacteristic(
@@ -894,9 +925,12 @@ internal class BLEGattService : Service() {
     }
 
     private fun onDisconnect() {
-        Log.d(TAG, "disconnect...")
         val state = state.value
-        if (state !is State.Connected) TODO("connect state: $state")
+        if (state !is State.Connected) {
+            Log.d(TAG, "There is nothing left to disconnect.")
+            return
+        }
+        Log.d(TAG, "disconnect...")
         val address = state.address
         val service: Service = this
         _state.value = State.Disconnecting(address = address)
@@ -979,16 +1013,16 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onWriteCharacteristic(
+    private val characteristicsToWrite: Queue<Triple<UUID, UUID, ByteArray>> = ConcurrentLinkedQueue()
+    private fun writeCharacteristics(
         service: UUID,
         characteristic: UUID,
         bytes: ByteArray,
     ) {
-        Log.d(TAG, "on write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
-        if (state !is State.Connected) TODO("Write C state: $state")
-        if (state.type != State.Connected.Type.READY) TODO("Write C state type: ${state.type}")
-        _state.value = state.copy(type = State.Connected.Type.WRITING)
+        if (state !is State.Connected) TODO("write $service/$characteristic state: $state")
+        if (state.type != State.Connected.Type.WRITING) TODO("write $service/$characteristic state type: ${state.type}")
+        Log.d(TAG, "on write $service/$characteristic...")
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
@@ -1004,9 +1038,62 @@ internal class BLEGattService : Service() {
                     // todo
                 },
                 onFailure = {
-                    TODO("GATT write C error: $it!")
+                    when (it) {
+                        is GattException -> {
+                            when (it.type) {
+                                GattException.Type.WRITING_WAS_NOT_INITIATED -> {
+                                    Log.w(TAG, "Writing $service/$characteristic was not initiated!")
+                                }
+                            }
+                        }
+                        else -> {
+                            TODO("write $service/$characteristic error: $it")
+                        }
+                    }
                 },
             )
+        }
+    }
+    private fun writeCharacteristics() {
+        val state = state.value
+        if (state !is State.Connected) TODO("write characteristics state: $state")
+        val triple = characteristicsToWrite.poll()
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                if (triple == null) return
+                _state.value = state.copy(type = State.Connected.Type.WRITING)
+                val (service, characteristic, bytes) = triple
+                writeCharacteristics(service = service, characteristic = characteristic, bytes = bytes)
+            }
+            State.Connected.Type.WRITING -> {
+                if (triple == null) {
+                    _state.value = state.copy(type = State.Connected.Type.READY)
+                    return
+                }
+                val (service, characteristic, bytes) = triple
+                writeCharacteristics(service = service, characteristic = characteristic, bytes = bytes)
+            }
+            else -> TODO("write characteristics state type: ${state.type}")
+        }
+    }
+
+    private fun onWriteCharacteristic(
+        service: UUID,
+        characteristic: UUID,
+        bytes: ByteArray,
+    ) {
+        Log.d(TAG, "On write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on write $service/$characteristic state: $state")
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                characteristicsToWrite.add(Triple(service, characteristic, bytes))
+                writeCharacteristics()
+            }
+            State.Connected.Type.WRITING -> {
+                characteristicsToWrite.add(Triple(service, characteristic, bytes))
+            }
+            else -> TODO("on write $service/$characteristic state type: ${state.type}")
         }
     }
 
@@ -1193,6 +1280,11 @@ internal class BLEGattService : Service() {
                 )
             }
             Action.WRITE_CHARACTERISTIC -> {
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be written. Already disconnected.")
+                    return
+                }
                 val bytes = intent.getByteArrayExtra("bytes") ?: TODO("No bytes!")
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
@@ -1248,17 +1340,52 @@ internal class BLEGattService : Service() {
 
     private fun onNewState(oldState: State, newState: State) {
         if (oldState is State.Connected) {
-            if (newState !is State.Connected) {
+            if (newState is State.Connected) {
+                when (oldState.type) {
+                    State.Connected.Type.READY -> {
+                        when (newState.type) {
+                            State.Connected.Type.PAIRING -> {
+                                val filter = IntentFilter().also {
+                                    if (pin != null) {
+                                        it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
+                                    }
+                                    it.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
+                                }
+                                registerReceiver(receiversPairing, filter)
+                            }
+                            else -> {
+                                // noop
+                            }
+                        }
+                    }
+                    State.Connected.Type.PAIRING -> {
+                        when (newState.type) {
+                            State.Connected.Type.PAIRING -> {
+                                // noop
+                            }
+                            else -> {
+                                unregisterReceiver(receiversPairing)
+                            }
+                        }
+                    }
+                    else -> {
+                        // noop
+                    }
+                }
+            } else {
                 unregisterReceiver(receiversConnected)
             }
         } else {
             if (newState is State.Connected) {
                 val filter = IntentFilter().also {
+                    it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
                     it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
                     it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-                    it.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
                 }
                 registerReceiver(receiversConnected, filter)
+                scope.launch {
+                    _broadcast.emit(Broadcast.OnConnect(newState))
+                }
             }
         }
         if (oldState is State.Disconnected) {
@@ -1429,6 +1556,7 @@ internal class BLEGattService : Service() {
             context.startService(intent)
         }
 
+        @JvmStatic
         fun disconnect(context: Context) {
             val intent = intent(context, Action.DISCONNECT)
             context.startService(intent)
@@ -1444,6 +1572,7 @@ internal class BLEGattService : Service() {
             context.startService(intent)
         }
 
+        @JvmStatic
         fun pair(context: Context, pin: String) {
             val intent = intent(context, Action.PAIR)
             intent.putExtra("pin", pin)

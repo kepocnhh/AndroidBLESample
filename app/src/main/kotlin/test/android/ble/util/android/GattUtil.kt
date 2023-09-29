@@ -3,6 +3,12 @@ package test.android.ble.util.android
 import android.bluetooth.BluetoothGatt
 import java.util.UUID
 
+internal class GattException(val type: Type): Exception() {
+    enum class Type {
+        WRITING_WAS_NOT_INITIATED
+    }
+}
+
 internal object GattUtil {
     fun setCharacteristicNotification(
         gatt: BluetoothGatt,
@@ -47,7 +53,7 @@ internal object GattUtil {
             TODO("Characteristic set value error!")
         }
         if (!gatt.writeCharacteristic(characteristic)) {
-            TODO("GATT write C error!")
+            throw GattException(GattException.Type.WRITING_WAS_NOT_INITIATED)
         }
     }
 
