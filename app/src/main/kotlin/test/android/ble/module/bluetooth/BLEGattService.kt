@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -18,6 +19,7 @@ import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
+import android.os.Parcelable
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -111,14 +113,18 @@ internal class BLEGattService : Service() {
     private val scope = CoroutineScope(Dispatchers.Main + job)
     private var gatt: BluetoothGatt? = null
     private var pin: String? = null
+    private var scanSettings: ScanSettings? = null
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            Log.d(TAG, "on scan device [$callbackType] ${result?.device?.address}/${result?.device?.name}")
+            if (result == null) {
+                Log.w(TAG, "No scan result!")
+                return
+            }
+            Log.d(TAG, "ScanResult: ct [$callbackType] - ${result.device.address}/${result.device.name}")
             when (val bleState = state.value) {
                 is State.Search -> {
                     when (bleState.type) {
                         State.Search.Type.COMING -> {
-                            if (result == null) return
                             val scanRecord = result.scanRecord ?: return
                             val device = result.device ?: return
                             if (device.address == bleState.address) onConnect()
@@ -132,8 +138,8 @@ internal class BLEGattService : Service() {
                     // noop
                 }
                 is State.Connected -> {
-                    if (bleState.address != result?.device?.address) {
-                        TODO("Expected ${bleState.address}\nActual ${result?.device?.address}")
+                    if (bleState.address != result.device?.address) {
+                        TODO("Expected ${bleState.address}\nActual ${result.device?.address}")
                     }
                 }
                 else -> TODO("onScanResult bleState: $bleState")
@@ -759,6 +765,7 @@ internal class BLEGattService : Service() {
         val state = state.value
         if (state !is State.Search) TODO()
         if (state.type != State.Search.Type.WAITING) TODO()
+        val scanSettings = scanSettings ?: TODO()
         val service: Service = this
         _state.value = State.Search(
             address = state.address,
@@ -766,7 +773,7 @@ internal class BLEGattService : Service() {
         )
         runCatching {
             withContext(Dispatchers.Default) {
-                scanStart(scanCallback, scanSettings = TODO())
+                scanStart(scanCallback, scanSettings = scanSettings)
             }
         }.fold(
             onSuccess = {
@@ -898,9 +905,10 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onConnect(address: String) {
+    private fun onConnect(address: String, scanSettings: ScanSettings) {
         Log.d(TAG, "connect $address...")
         if (state.value != State.Disconnected) TODO("connect state: $state")
+        this.scanSettings = scanSettings
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
@@ -1256,7 +1264,15 @@ internal class BLEGattService : Service() {
         val intentAction = intent.action ?: TODO("No intent action!")
         if (intentAction.isEmpty()) TODO("Intent action is empty!")
         when (Action.values().firstOrNull { it.name == intentAction }) {
-            Action.CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
+            Action.CONNECT -> {
+                val address = intent.getStringExtra("address")
+                if (address.isNullOrEmpty()) TODO()
+                val scanSettings = intent.getParcelableExtra<ScanSettings>("scanSettings") ?: TODO()
+                onConnect(
+                    address = address,
+                    scanSettings = scanSettings,
+                )
+            }
             Action.SEARCH_STOP -> onStopSearch()
             Action.DISCONNECT -> onDisconnect()
             Action.REQUEST_SERVICES -> onRequestServices()
@@ -1411,6 +1427,7 @@ internal class BLEGattService : Service() {
                 scope.launch {
                     _broadcast.emit(Broadcast.OnDisconnect)
                 }
+                scanSettings = null
             }
         }
     }
@@ -1563,9 +1580,10 @@ internal class BLEGattService : Service() {
         }
 
         @JvmStatic
-        fun connect(context: Context, address: String) {
+        fun connect(context: Context, address: String, scanSettings: ScanSettings) {
             val intent = intent(context, Action.CONNECT)
             intent.putExtra("address", address)
+            intent.putExtra("scanSettings", scanSettings as Parcelable)
             context.startService(intent)
         }
 

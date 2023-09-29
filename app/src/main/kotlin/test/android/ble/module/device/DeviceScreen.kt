@@ -1,6 +1,7 @@
 package test.android.ble.module.device
 
 import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.le.ScanSettings
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -716,6 +717,16 @@ internal fun DeviceScreen(
             }
         }
     }
+    val scanSettings = remember {
+        ScanSettings
+            .Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+            .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT)
+            .setReportDelay(0L)
+            .build()
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -808,7 +819,7 @@ internal fun DeviceScreen(
                         text = "connect",
                         enabled = gattState == BLEGattService.State.Disconnected,
                         onClick = {
-                            BLEGattService.connect(context, address = address)
+                            BLEGattService.connect(context, address = address, scanSettings = scanSettings)
                         },
                     )
                     Button(

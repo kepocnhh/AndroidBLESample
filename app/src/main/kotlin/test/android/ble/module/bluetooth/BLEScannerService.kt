@@ -51,7 +51,7 @@ internal class BLEScannerService : Service() {
                 Log.w(TAG, "No scan result!")
                 return
             }
-            Log.d(TAG, "ScanResult: ct $callbackType - ${result.device.address}/${result.device.name}")
+            Log.d(TAG, "ScanResult: ct [$callbackType] - ${result.device.address}/${result.device.name}")
             val scanRecord = result.scanRecord ?: return
             val device = result.device ?: return
             val btDevice = BTDevice(
@@ -173,7 +173,7 @@ internal class BLEScannerService : Service() {
     private fun onStartCommand(intent: Intent) {
         when (intent.action) {
             ACTION_SCAN_START -> {
-                val scanSettings = intent.getParcelableExtra("scanSettings") ?: ScanSettings.Builder().build()
+                val scanSettings = intent.getParcelableExtra<ScanSettings>("scanSettings") ?: TODO()
                 onScanStart(scanSettings = scanSettings)
             }
             ACTION_SCAN_STOP -> onScanStop()
