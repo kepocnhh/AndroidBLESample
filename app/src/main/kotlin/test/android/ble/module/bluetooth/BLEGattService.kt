@@ -157,25 +157,29 @@ internal class BLEGattService : Service() {
                 BluetoothGatt.GATT_SUCCESS -> {
                     when (newState) {
                         BluetoothProfile.STATE_CONNECTED -> {
-                            when (state.value) {
+                            when (val state = state.value) {
                                 is State.Connecting -> {
-                                    if (gatt == null) TODO("Connection state is connected, but no GATT!")
+                                    if (gatt == null) TODO("State: $state. Connection state is connected. But no GATT!")
                                     onConnectSuccess(gatt)
                                 }
-                                else -> TODO()
+                                else -> TODO("State: $state. But GATT connected!")
                             }
                         }
                         BluetoothProfile.STATE_DISCONNECTED -> {
-                            val state = state.value
-                            Log.w(TAG, "GATT disconnected! $state")
-                            when (state) {
+                            when (val state = state.value) {
                                 is State.Disconnecting -> {
+                                    Log.d(TAG, "GATT disconnected.")
                                     disconnect()
                                 }
                                 is State.Connected -> {
+                                    Log.w(TAG, "GATT disconnected from connected state!")
                                     onDisconnectToSearch()
                                 }
-                                else -> TODO()
+                                is State.Connecting -> {
+                                    Log.w(TAG, "GATT disconnected from connecting state!")
+                                    onDisconnectToSearch()
+                                }
+                                else -> TODO("State: $state. But GATT disconnected!")
                             }
                         }
                         else -> {
@@ -385,6 +389,9 @@ internal class BLEGattService : Service() {
                                 }
                             }
                             is State.Connected -> {
+                                onDisconnectToSearch()
+                            }
+                            is State.Connecting -> {
                                 onDisconnectToSearch()
                             }
                             else -> {
@@ -917,7 +924,7 @@ internal class BLEGattService : Service() {
                     while (BLEGattService.state.value is State.Connecting) {
                         val timeNow = System.currentTimeMillis().milliseconds
                         val diff = timeNow - timeStart
-                        if (diff > 100.seconds) {
+                        if (diff > 10.seconds) {
                             Log.w(TAG, "$diff have passed since the connection started. So lets switch off.")
                             onDisconnectToSearch()
                             break
