@@ -33,6 +33,7 @@ import kotlinx.coroutines.withContext
 import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BTException
+import test.android.ble.util.android.GattException
 import test.android.ble.util.android.GattUtil
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.PairException
@@ -571,7 +572,10 @@ internal class BLEGattService : Service() {
         value: ByteArray,
     ) {
         val state = state.value
-        if (state !is State.Connected) TODO("On characteristic changed state: $state")
+        if (state !is State.Connected) {
+            Log.d(TAG, "The changes are no longer relevant. Disconnected.")
+            return
+        }
         scope.launch {
             _profileBroadcast.emit(
                 Profile.Broadcast.OnChangeCharacteristic(
@@ -601,7 +605,10 @@ internal class BLEGattService : Service() {
 
     private fun onCharacteristicWrite(characteristic: BluetoothGattCharacteristic) {
         val state = state.value
-        if (state !is State.Connected) TODO("on characteristic write state: $state")
+        if (state !is State.Connected) {
+            Log.d(TAG, "The writing results are no longer relevant. Disconnected.")
+            return
+        }
         if (state.type != State.Connected.Type.WRITING) TODO("on characteristic write state type: ${state.type}")
         writeCharacteristics()
         scope.launch {
@@ -918,9 +925,12 @@ internal class BLEGattService : Service() {
     }
 
     private fun onDisconnect() {
-        Log.d(TAG, "disconnect...")
         val state = state.value
-        if (state !is State.Connected) TODO("connect state: $state")
+        if (state !is State.Connected) {
+            Log.d(TAG, "There is nothing left to disconnect.")
+            return
+        }
+        Log.d(TAG, "disconnect...")
         val address = state.address
         val service: Service = this
         _state.value = State.Disconnecting(address = address)
@@ -1028,7 +1038,18 @@ internal class BLEGattService : Service() {
                     // todo
                 },
                 onFailure = {
-                    TODO("GATT write C error: $it!")
+                    when (it) {
+                        is GattException -> {
+                            when (it.type) {
+                                GattException.Type.WRITING_WAS_NOT_INITIATED -> {
+                                    Log.w(TAG, "Writing $service/$characteristic was not initiated!")
+                                }
+                            }
+                        }
+                        else -> {
+                            TODO("write $service/$characteristic error: $it")
+                        }
+                    }
                 },
             )
         }
@@ -1259,6 +1280,11 @@ internal class BLEGattService : Service() {
                 )
             }
             Action.WRITE_CHARACTERISTIC -> {
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be written. Already disconnected.")
+                    return
+                }
                 val bytes = intent.getByteArrayExtra("bytes") ?: TODO("No bytes!")
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
