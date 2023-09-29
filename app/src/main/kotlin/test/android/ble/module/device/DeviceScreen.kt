@@ -710,6 +710,9 @@ internal fun DeviceScreen(
                 is BLEGattService.Profile.Broadcast.OnChangeCharacteristic -> {
                     lastChangedState.value = Triple(broadcast.service, broadcast.characteristic, broadcast.bytes)
                 }
+                is BLEGattService.Profile.Broadcast.OnSetCharacteristicNotification -> {
+                    Log.d(TAG, "set ${broadcast.service}/${broadcast.characteristic} notification: ${broadcast.value}")
+                }
             }
         }
     }

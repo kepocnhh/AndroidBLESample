@@ -1236,7 +1236,15 @@ internal class BLEGattService : Service() {
                 }
             },
             onSuccess = {
-                // todo
+                scope.launch {
+                    _profileBroadcast.emit(
+                        Profile.Broadcast.OnSetCharacteristicNotification(
+                            service = service,
+                            characteristic = characteristic,
+                            value = value,
+                        ),
+                    )
+                }
             },
             onFailure = {
                 TODO("On set characteristic notification error: $it!")
@@ -1467,6 +1475,11 @@ internal class BLEGattService : Service() {
             class OnServicesDiscovered(
                 val services: List<BluetoothGattService>, // todo platform!
             ) : Broadcast
+            class OnSetCharacteristicNotification(
+                val service: UUID,
+                val characteristic: UUID,
+                val value: Boolean,
+            ) : Broadcast
         }
 
         val broadcast = _profileBroadcast.asSharedFlow()
@@ -1562,6 +1575,7 @@ internal class BLEGattService : Service() {
             context.startService(intent)
         }
 
+        @JvmStatic
         fun searchStop(context: Context) {
             val intent = intent(context, Action.SEARCH_STOP)
             context.startService(intent)
