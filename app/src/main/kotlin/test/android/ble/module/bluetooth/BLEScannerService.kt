@@ -47,8 +47,11 @@ internal class BLEScannerService : Service() {
     private val scope = CoroutineScope(Dispatchers.Main + job)
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            Log.d(TAG, "on scan result: callback $callbackType result $result")
-            if (result == null) return
+            if (result == null) {
+                Log.w(TAG, "No scan result!")
+                return
+            }
+            Log.d(TAG, "ScanResult: ct $callbackType - ${result.device.address}/${result.device.name}")
             val scanRecord = result.scanRecord ?: return
             val device = result.device ?: return
             val btDevice = BTDevice(
