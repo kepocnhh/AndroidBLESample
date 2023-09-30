@@ -911,41 +911,51 @@ internal class BLEGattService : Service() {
             service = service,
             title = "connecting $address...",
         )
-        scope.launch {
-            runCatching {
-                gatt = withContext(Dispatchers.Default) {
+        launchCatching(
+            block = {
+                withContext(Dispatchers.Default) {
                     val autoConnect = false
+                    val transport = BluetoothDevice.TRANSPORT_LE
                     requireBTAdapter()
                         .getRemoteDevice(address)
-                        .connectGatt(service, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                        .connectGatt(service, autoConnect, gattCallback, transport)
                 }
+            },
+            onSuccess = { newGatt ->
+                gatt = newGatt
+                val timeMax = 10.seconds
                 val timeStart = System.currentTimeMillis().milliseconds
+                val timeDelay = 100.milliseconds
                 withContext(Dispatchers.Default) {
                     while (BLEGattService.state.value is State.Connecting) {
                         val timeNow = System.currentTimeMillis().milliseconds
                         val diff = timeNow - timeStart
-                        if (diff > 10.seconds) {
+                        if (diff > timeMax) {
                             Log.w(TAG, "$diff have passed since the connection started. So lets switch off.")
+                            _broadcast.emit(Broadcast.OnError(GattException(GattException.Type.DISCONNECTING_BY_TIMEOUT)))
                             onDisconnectToSearch()
                             break
                         }
-                        delay(250)
+                        val timeLeft = timeMax - diff
+                        if (timeLeft.inWholeMilliseconds - timeLeft.inWholeSeconds * 1_000 < timeDelay.inWholeMilliseconds) {
+                            if (timeLeft.inWholeSeconds > 0) {
+                                Log.i(TAG, "Connect to $address. ${timeLeft.inWholeSeconds} seconds left...")
+                            }
+                        }
+                        delay(timeDelay)
                     }
                 }
-            }.fold(
-                onSuccess = {
-                    // todo
-                },
-                onFailure = {
-                    _broadcast.emit(Broadcast.OnError(it))
-                    _state.value = State.Search(
-                        address = address,
-                        type = State.Search.Type.WAITING,
-                    )
-                    fromWaiting()
-                },
-            )
-        }
+            },
+            onFailure = {
+                Log.w(TAG, "on connect GATT $address error: $it")
+                _broadcast.emit(Broadcast.OnError(it))
+                _state.value = State.Search(
+                    address = address,
+                    type = State.Search.Type.WAITING,
+                )
+                fromWaiting()
+            },
+        )
     }
 
     private fun onConnect(address: String, scanSettings: ScanSettings) {
@@ -1093,6 +1103,9 @@ internal class BLEGattService : Service() {
                             when (it.type) {
                                 GattException.Type.WRITING_WAS_NOT_INITIATED -> {
                                     Log.w(TAG, "Writing $service/$characteristic was not initiated!")
+                                }
+                                else -> {
+                                    // noop
                                 }
                             }
                         }

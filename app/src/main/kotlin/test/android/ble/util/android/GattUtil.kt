@@ -5,7 +5,8 @@ import java.util.UUID
 
 internal class GattException(val type: Type): Exception() {
     enum class Type {
-        WRITING_WAS_NOT_INITIATED
+        WRITING_WAS_NOT_INITIATED,
+        DISCONNECTING_BY_TIMEOUT,
     }
 }
 

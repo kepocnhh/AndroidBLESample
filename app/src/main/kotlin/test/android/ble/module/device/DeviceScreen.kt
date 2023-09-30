@@ -44,6 +44,7 @@ import test.android.ble.App
 import test.android.ble.module.bluetooth.BLEGattService
 import test.android.ble.util.android.BLEException
 import test.android.ble.util.android.BTException
+import test.android.ble.util.android.GattException
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.PairException
 import test.android.ble.util.android.checkPIN
@@ -651,6 +652,16 @@ internal fun DeviceScreen(
                             when (broadcast.error.error) {
                                 BLEException.Error.NO_SCANNER -> context.showToast("No scanner!")
                                 BLEException.Error.NO_SCAN_PERMISSION -> context.showToast("No scan permission!")
+                            }
+                        }
+                        is GattException -> {
+                            when (broadcast.error.type) {
+                                GattException.Type.WRITING_WAS_NOT_INITIATED -> {
+                                    // todo
+                                }
+                                GattException.Type.DISCONNECTING_BY_TIMEOUT -> {
+                                    context.showToast("Disconnecting by timeout!")
+                                }
                             }
                         }
                         else -> {
