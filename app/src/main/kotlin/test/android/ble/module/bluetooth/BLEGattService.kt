@@ -123,14 +123,20 @@ internal class BLEGattService : Service() {
                 Log.w(TAG, "No scan result!")
                 return
             }
-            Log.d(TAG, "ScanResult: ct [$callbackType] - ${result.device.address}/${result.device.name}")
             when (val bleState = state.value) {
                 is State.Search -> {
                     when (bleState.type) {
                         State.Search.Type.COMING -> {
-                            val scanRecord = result.scanRecord ?: return
-                            val device = result.device ?: return
-                            if (device.address == bleState.address) onConnect()
+                            val device = result.device ?: TODO("State: $bleState. But no device!")
+                            Log.d(TAG, "ScanResult: ct [$callbackType] - ${device.address}/${device.name}")
+                            if (device.address == bleState.address) {
+                                try {
+                                    scanStop(this)
+                                } catch (e: Throwable) {
+                                    // todo
+                                }
+                                onConnect()
+                            }
                         }
                         else -> {
                             // noop
@@ -924,8 +930,8 @@ internal class BLEGattService : Service() {
             onSuccess = { newGatt ->
                 gatt = newGatt
                 val timeMax = 10.seconds
-                val timeStart = System.currentTimeMillis().milliseconds
                 val timeDelay = 100.milliseconds
+                val timeStart = System.currentTimeMillis().milliseconds
                 withContext(Dispatchers.Default) {
                     while (BLEGattService.state.value is State.Connecting) {
                         val timeNow = System.currentTimeMillis().milliseconds
