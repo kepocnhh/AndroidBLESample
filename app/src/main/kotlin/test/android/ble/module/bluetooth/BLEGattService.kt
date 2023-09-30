@@ -143,15 +143,7 @@ internal class BLEGattService : Service() {
                         }
                     }
                 }
-                is State.Connecting -> {
-                    // noop
-                }
-                is State.Connected -> {
-                    if (bleState.address != result.device?.address) {
-                        TODO("Expected ${bleState.address}\nActual ${result.device?.address}")
-                    }
-                }
-                else -> TODO("onScanResult bleState: $bleState")
+                else -> TODO("This callback should only operate in the searching state. But state is $bleState!")
             }
         }
     }
@@ -452,9 +444,23 @@ internal class BLEGattService : Service() {
                     val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
                         ?: TODO("No device!")
                     val state = state.value
-                    if (state !is State.Connected) TODO("State: $state!")
-                    if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
-                    if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
+                    if (state !is State.Connected) TODO("This receiver should only operate in the connected state. But state is $state!")
+                    when (state.type) {
+                        State.Connected.Type.PAIRING, State.Connected.Type.UNPAIRING -> {
+                            // noop
+                        }
+                        else -> {
+                            if (device.address == state.address) {
+                                TODO("The service is not ready for pairing/unpairing device ${state.address}!")
+                            }
+                            Log.d(TAG, "State: $state. Type: ${state.type}. So I ignore device ${device.address}.")
+                            return
+                        }
+                    }
+                    if (device.address != state.address) {
+                        Log.d(TAG, "Expected device ${state.address}. So I ignore device ${device.address}.")
+                        return
+                    }
                     Log.d(TAG, "Bond state changed: $oldState -> $newState")
                     when (newState) {
                         BluetoothDevice.BOND_BONDED -> {
@@ -752,7 +758,10 @@ internal class BLEGattService : Service() {
     private fun onBTDeviceDisconnected(device: BluetoothDevice) {
         when (val state = state.value) {
             is State.Connected -> {
-                if (device.address != state.address) TODO()
+                if (device.address != state.address) {
+                    Log.d(TAG, "Device ${device.address} ignored.")
+                    return
+                }
                 onDisconnectToSearch()
             }
             is State.Search -> {
