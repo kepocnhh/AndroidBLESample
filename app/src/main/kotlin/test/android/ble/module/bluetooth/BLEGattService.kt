@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -18,10 +19,12 @@ import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
+import android.os.Parcelable
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -47,6 +50,8 @@ import test.android.ble.util.android.scanStop
 import java.util.Queue
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 internal class BLEGattService : Service() {
     sealed interface Broadcast {
@@ -111,17 +116,27 @@ internal class BLEGattService : Service() {
     private val scope = CoroutineScope(Dispatchers.Main + job)
     private var gatt: BluetoothGatt? = null
     private var pin: String? = null
+    private var scanSettings: ScanSettings? = null
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            Log.d(TAG, "on scan device [$callbackType] ${result?.device?.address}/${result?.device?.name}")
+            if (result == null) {
+                Log.w(TAG, "No scan result!")
+                return
+            }
             when (val bleState = state.value) {
                 is State.Search -> {
                     when (bleState.type) {
                         State.Search.Type.COMING -> {
-                            if (result == null) return
-                            val scanRecord = result.scanRecord ?: return
-                            val device = result.device ?: return
-                            if (device.address == bleState.address) onConnect()
+                            val device = result.device ?: TODO("State: $bleState. But no device!")
+                            Log.d(TAG, "ScanResult: ct [$callbackType] - ${device.address}/${device.name}")
+                            if (device.address == bleState.address) {
+                                try {
+                                    scanStop(this)
+                                } catch (e: Throwable) {
+                                    // todo
+                                }
+                                onConnect()
+                            }
                         }
                         else -> {
                             // noop
@@ -132,8 +147,8 @@ internal class BLEGattService : Service() {
                     // noop
                 }
                 is State.Connected -> {
-                    if (bleState.address != result?.device?.address) {
-                        TODO("Expected ${bleState.address}\nActual ${result?.device?.address}")
+                    if (bleState.address != result.device?.address) {
+                        TODO("Expected ${bleState.address}\nActual ${result.device?.address}")
                     }
                 }
                 else -> TODO("onScanResult bleState: $bleState")
@@ -142,35 +157,54 @@ internal class BLEGattService : Service() {
     }
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
-            if (gatt == null) return // todo
             Log.d(TAG, "on connection state change $status $newState")
+            val GATT_ERROR = 133 // https://stackoverflow.com/a/60849590
             when (status) {
                 BluetoothGatt.GATT_SUCCESS -> {
                     when (newState) {
                         BluetoothProfile.STATE_CONNECTED -> {
-                            when (state.value) {
+                            when (val state = state.value) {
                                 is State.Connecting -> {
+                                    if (gatt == null) TODO("State: $state. Connection state is connected. But no GATT!")
                                     onConnectSuccess(gatt)
                                 }
-                                else -> TODO()
+                                else -> TODO("State: $state. But GATT connected!")
                             }
                         }
                         BluetoothProfile.STATE_DISCONNECTED -> {
-                            val state = state.value
-                            Log.w(TAG, "GATT disconnected! $state")
-                            when (state) {
+                            when (val state = state.value) {
                                 is State.Disconnecting -> {
+                                    Log.d(TAG, "GATT disconnected.")
                                     disconnect()
                                 }
                                 is State.Connected -> {
+                                    Log.w(TAG, "GATT disconnected from connected state!")
                                     onDisconnectToSearch()
                                 }
-                                else -> TODO()
+                                is State.Connecting -> {
+                                    Log.w(TAG, "GATT disconnected from connecting state!")
+                                    onDisconnectToSearch()
+                                }
+                                else -> TODO("State: $state. But GATT disconnected!")
                             }
                         }
                         else -> {
                             TODO("Gatt newState: $newState")
                         }
+                    }
+                }
+                GATT_ERROR -> {
+                    when (newState) {
+                        BluetoothProfile.STATE_DISCONNECTED -> {
+                            Log.w(TAG, "GATT error!")
+                            when (val state = state.value) {
+                                is State.Connecting -> {
+                                    onDisconnectToSearch()
+                                }
+                                else -> TODO("GATT error! state: $state")
+                            }
+                        }
+                        else -> TODO("GATT error! $newState")
                     }
                 }
                 else -> {
@@ -361,6 +395,9 @@ internal class BLEGattService : Service() {
                                 }
                             }
                             is State.Connected -> {
+                                onDisconnectToSearch()
+                            }
+                            is State.Connecting -> {
                                 onDisconnectToSearch()
                             }
                             else -> {
@@ -668,7 +705,6 @@ internal class BLEGattService : Service() {
         if (state !is State.Connecting) TODO()
         if (state.type != State.Connecting.Type.DISCOVER) TODO()
         val service = this
-        this.gatt = gatt
         ForegroundUtil.startForeground(
             service = service,
             title = "connected ${state.address}",
@@ -704,6 +740,9 @@ internal class BLEGattService : Service() {
             is State.Connected -> {
                 onDisconnectToSearch()
             }
+            is State.Connecting -> {
+                onDisconnectToSearch()
+            }
             else -> {
                 // todo
             }
@@ -727,7 +766,7 @@ internal class BLEGattService : Service() {
         val state = state.value
         if (state !is State.Disconnecting) TODO("state: $state")
         _state.value = State.Disconnected
-        val oldGatt = checkNotNull(gatt)
+        val oldGatt = gatt ?: TODO("State: $state. But no GATT!")
         try {
             oldGatt.close()
         } catch (e: Throwable) {
@@ -738,17 +777,20 @@ internal class BLEGattService : Service() {
 
     private fun onDisconnectToSearch() {
         Log.d(TAG, "on disconnect to search...")
-        val state = state.value
-        if (state !is State.Connected) TODO("state: $state")
+        val address = when (val state = state.value) {
+            is State.Connected -> state.address
+            is State.Connecting -> state.address
+            else -> TODO("on disconnect to search state: $state")
+        }
         _state.value = State.Search(
-            address = state.address,
+            address = address,
             type = State.Search.Type.WAITING,
         )
-        val oldGatt = checkNotNull(gatt)
+        val oldGatt = gatt ?: TODO("State: $state. But no GATT!")
         try {
             oldGatt.close()
         } catch (e: Throwable) {
-            Log.w(TAG, "Close gatt ${state.address} error: $e")
+            Log.w(TAG, "Close gatt $address error: $e")
         }
         gatt = null
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -759,6 +801,7 @@ internal class BLEGattService : Service() {
         val state = state.value
         if (state !is State.Search) TODO()
         if (state.type != State.Search.Type.WAITING) TODO()
+        val scanSettings = scanSettings ?: TODO()
         val service: Service = this
         _state.value = State.Search(
             address = state.address,
@@ -766,7 +809,7 @@ internal class BLEGattService : Service() {
         )
         runCatching {
             withContext(Dispatchers.Default) {
-                scanStart(scanCallback)
+                scanStart(scanCallback, scanSettings = scanSettings)
             }
         }.fold(
             onSuccess = {
@@ -874,33 +917,57 @@ internal class BLEGattService : Service() {
             service = service,
             title = "connecting $address...",
         )
-        scope.launch {
-            runCatching {
+        launchCatching(
+            block = {
                 withContext(Dispatchers.Default) {
                     val autoConnect = false
+                    val transport = BluetoothDevice.TRANSPORT_LE
                     requireBTAdapter()
                         .getRemoteDevice(address)
-                        .connectGatt(service, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                        .connectGatt(service, autoConnect, gattCallback, transport)
                 }
-            }.fold(
-                onSuccess = {
-                    // todo
-                },
-                onFailure = {
-                    _broadcast.emit(Broadcast.OnError(it))
-                    _state.value = State.Search(
-                        address = address,
-                        type = State.Search.Type.WAITING,
-                    )
-                    fromWaiting()
-                },
-            )
-        }
+            },
+            onSuccess = { newGatt ->
+                gatt = newGatt
+                val timeMax = 10.seconds
+                val timeDelay = 100.milliseconds
+                val timeStart = System.currentTimeMillis().milliseconds
+                withContext(Dispatchers.Default) {
+                    while (BLEGattService.state.value is State.Connecting) {
+                        val timeNow = System.currentTimeMillis().milliseconds
+                        val diff = timeNow - timeStart
+                        if (diff > timeMax) {
+                            Log.w(TAG, "$diff have passed since the connection started. So lets switch off.")
+                            _broadcast.emit(Broadcast.OnError(GattException(GattException.Type.DISCONNECTING_BY_TIMEOUT)))
+                            onDisconnectToSearch()
+                            break
+                        }
+                        val timeLeft = timeMax - diff
+                        if (timeLeft.inWholeMilliseconds - timeLeft.inWholeSeconds * 1_000 < timeDelay.inWholeMilliseconds) {
+                            if (timeLeft.inWholeSeconds > 0) {
+                                Log.i(TAG, "Connect to $address. ${timeLeft.inWholeSeconds} seconds left...")
+                            }
+                        }
+                        delay(timeDelay)
+                    }
+                }
+            },
+            onFailure = {
+                Log.w(TAG, "on connect GATT $address error: $it")
+                _broadcast.emit(Broadcast.OnError(it))
+                _state.value = State.Search(
+                    address = address,
+                    type = State.Search.Type.WAITING,
+                )
+                fromWaiting()
+            },
+        )
     }
 
-    private fun onConnect(address: String) {
+    private fun onConnect(address: String, scanSettings: ScanSettings) {
         Log.d(TAG, "connect $address...")
         if (state.value != State.Disconnected) TODO("connect state: $state")
+        this.scanSettings = scanSettings
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
@@ -911,10 +978,9 @@ internal class BLEGattService : Service() {
                 onSuccess = {
                     _state.value = State.Search(
                         address = address,
-                        type = State.Search.Type.WAITING,
+                        type = State.Search.Type.COMING,
                     )
-                    startForegroundWaiting()
-                    toComing()
+                    onConnect()
                 },
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
@@ -1043,6 +1109,9 @@ internal class BLEGattService : Service() {
                             when (it.type) {
                                 GattException.Type.WRITING_WAS_NOT_INITIATED -> {
                                     Log.w(TAG, "Writing $service/$characteristic was not initiated!")
+                                }
+                                else -> {
+                                    // noop
                                 }
                             }
                         }
@@ -1236,7 +1305,15 @@ internal class BLEGattService : Service() {
                 }
             },
             onSuccess = {
-                // todo
+                scope.launch {
+                    _profileBroadcast.emit(
+                        Profile.Broadcast.OnSetCharacteristicNotification(
+                            service = service,
+                            characteristic = characteristic,
+                            value = value,
+                        ),
+                    )
+                }
             },
             onFailure = {
                 TODO("On set characteristic notification error: $it!")
@@ -1248,7 +1325,15 @@ internal class BLEGattService : Service() {
         val intentAction = intent.action ?: TODO("No intent action!")
         if (intentAction.isEmpty()) TODO("Intent action is empty!")
         when (Action.values().firstOrNull { it.name == intentAction }) {
-            Action.CONNECT -> onConnect(address = intent.getStringExtra("address")!!)
+            Action.CONNECT -> {
+                val address = intent.getStringExtra("address")
+                if (address.isNullOrEmpty()) TODO()
+                val scanSettings = intent.getParcelableExtra<ScanSettings>("scanSettings") ?: TODO()
+                onConnect(
+                    address = address,
+                    scanSettings = scanSettings,
+                )
+            }
             Action.SEARCH_STOP -> onStopSearch()
             Action.DISCONNECT -> onDisconnect()
             Action.REQUEST_SERVICES -> onRequestServices()
@@ -1403,6 +1488,7 @@ internal class BLEGattService : Service() {
                 scope.launch {
                     _broadcast.emit(Broadcast.OnDisconnect)
                 }
+                scanSettings = null
             }
         }
     }
@@ -1466,6 +1552,11 @@ internal class BLEGattService : Service() {
             ) : Broadcast
             class OnServicesDiscovered(
                 val services: List<BluetoothGattService>, // todo platform!
+            ) : Broadcast
+            class OnSetCharacteristicNotification(
+                val service: UUID,
+                val characteristic: UUID,
+                val value: Boolean,
             ) : Broadcast
         }
 
@@ -1550,9 +1641,10 @@ internal class BLEGattService : Service() {
         }
 
         @JvmStatic
-        fun connect(context: Context, address: String) {
+        fun connect(context: Context, address: String, scanSettings: ScanSettings) {
             val intent = intent(context, Action.CONNECT)
             intent.putExtra("address", address)
+            intent.putExtra("scanSettings", scanSettings as Parcelable)
             context.startService(intent)
         }
 
@@ -1562,6 +1654,7 @@ internal class BLEGattService : Service() {
             context.startService(intent)
         }
 
+        @JvmStatic
         fun searchStop(context: Context) {
             val intent = intent(context, Action.SEARCH_STOP)
             context.startService(intent)

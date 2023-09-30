@@ -5,7 +5,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
 
-internal class BTException(val error: Error) : Exception() {
+internal class BTException(val error: Error) : Exception("Error: ${error.name}") {
     enum class Error {
         NO_ADAPTER,
         NO_PERMISSION,

@@ -1,6 +1,7 @@
 package test.android.ble.module.device
 
 import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.le.ScanSettings
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -43,6 +44,7 @@ import test.android.ble.App
 import test.android.ble.module.bluetooth.BLEGattService
 import test.android.ble.util.android.BLEException
 import test.android.ble.util.android.BTException
+import test.android.ble.util.android.GattException
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.PairException
 import test.android.ble.util.android.checkPIN
@@ -652,6 +654,16 @@ internal fun DeviceScreen(
                                 BLEException.Error.NO_SCAN_PERMISSION -> context.showToast("No scan permission!")
                             }
                         }
+                        is GattException -> {
+                            when (broadcast.error.type) {
+                                GattException.Type.WRITING_WAS_NOT_INITIATED -> {
+                                    // todo
+                                }
+                                GattException.Type.DISCONNECTING_BY_TIMEOUT -> {
+                                    context.showToast("Disconnecting by timeout!")
+                                }
+                            }
+                        }
                         else -> {
                             Log.w(TAG, "GATT unknown error: ${broadcast.error}")
                             context.showToast("Unknown error!")
@@ -710,8 +722,21 @@ internal fun DeviceScreen(
                 is BLEGattService.Profile.Broadcast.OnChangeCharacteristic -> {
                     lastChangedState.value = Triple(broadcast.service, broadcast.characteristic, broadcast.bytes)
                 }
+                is BLEGattService.Profile.Broadcast.OnSetCharacteristicNotification -> {
+                    Log.d(TAG, "set ${broadcast.service}/${broadcast.characteristic} notification: ${broadcast.value}")
+                }
             }
         }
+    }
+    val scanSettings = remember {
+        ScanSettings
+            .Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+            .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT)
+            .setReportDelay(0L)
+            .build()
     }
     Column(
         modifier = Modifier
@@ -805,7 +830,7 @@ internal fun DeviceScreen(
                         text = "connect",
                         enabled = gattState == BLEGattService.State.Disconnected,
                         onClick = {
-                            BLEGattService.connect(context, address = address)
+                            BLEGattService.connect(context, address = address, scanSettings = scanSettings)
                         },
                     )
                     Button(

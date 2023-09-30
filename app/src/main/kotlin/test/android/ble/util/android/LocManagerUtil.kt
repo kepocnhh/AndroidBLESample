@@ -3,7 +3,7 @@ package test.android.ble.util.android
 import android.content.Context
 import android.location.LocationManager
 
-internal class LocException(val error: Error) : Exception() {
+internal class LocException(val error: Error) : Exception("Error: ${error.name}") {
     enum class Error {
         DISABLED,
     }

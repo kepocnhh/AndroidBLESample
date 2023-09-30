@@ -1,5 +1,6 @@
 package test.android.ble.module.scanner
 
+import android.bluetooth.le.ScanSettings
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,6 +46,16 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
     val insets = LocalView.current.rootWindowInsets.toPaddings()
     val scanState by BLEScannerService.state.collectAsState()
     val devicesState = remember { mutableStateOf(listOf<BTDevice>()) }
+    val scanSettings = remember {
+        ScanSettings
+            .Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+            .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT)
+            .setReportDelay(0L)
+            .build()
+    }
     LaunchedEffect(Unit) {
         BLEScannerService.broadcast.collect { broadcast ->
             when (broadcast) {
@@ -77,7 +88,7 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                 is BLEScannerService.Broadcast.OnBTDevice -> {
                     val device = broadcast.device
                     if (devicesState.value.none { it.address == device.address }) {
-                        println("[Scanner]: device: $device")
+                        Log.i(TAG, "device: $device")
                         devicesState.value = devicesState.value + device
                     }
                 }
@@ -159,7 +170,7 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                                 BLEScannerService.scanStop(context)
                             }
                             BLEScannerService.State.STOPPED -> {
-                                BLEScannerService.scanStart(context)
+                                BLEScannerService.scanStart(context, scanSettings = scanSettings)
                             }
                             else -> {
                                 // noop
