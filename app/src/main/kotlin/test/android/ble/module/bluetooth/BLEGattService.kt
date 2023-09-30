@@ -451,7 +451,7 @@ internal class BLEGattService : Service() {
                         }
                         else -> {
                             if (device.address == state.address) {
-                                TODO("The service is not ready for pairing/unpairing device ${state.address}!")
+                                TODO("State: $state. Type: ${state.type}. The service is not ready for pairing/unpairing device ${state.address}!")
                             }
                             Log.d(TAG, "State: $state. Type: ${state.type}. So I ignore device ${device.address}.")
                             return

@@ -195,10 +195,13 @@ internal class BLEScannerService : Service() {
         val ACTION_SCAN_STOP = "${this::class.java.name}:ACTION_SCAN_STOP"
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
+        @JvmStatic
         val broadcast = _broadcast.asSharedFlow()
         private val _state = MutableStateFlow(State.STOPPED)
+        @JvmStatic
         val state = _state.asStateFlow()
 
+        @JvmStatic
         fun scanStart(context: Context, scanSettings: ScanSettings) {
             val intent = Intent(context, BLEScannerService::class.java)
             intent.action = ACTION_SCAN_START
@@ -206,6 +209,7 @@ internal class BLEScannerService : Service() {
             context.startService(intent)
         }
 
+        @JvmStatic
         fun scanStop(context: Context) {
             val intent = Intent(context, BLEScannerService::class.java)
             intent.action = ACTION_SCAN_STOP
