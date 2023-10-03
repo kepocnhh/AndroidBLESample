@@ -14,6 +14,7 @@ import test.android.ble.util.android.scanStart
 import test.android.ble.util.android.scanStop
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.absoluteValue
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -24,7 +25,7 @@ internal class BLEScanner(
     private val timeoutUntil: () -> Boolean,
 ) {
     private val scanCallback = AtomicReference<ScanCallback?>(null)
-    private val results = mutableSetOf<String>()
+    private var timeLastResult = System.currentTimeMillis().milliseconds
     private inner class InternalScanCallback : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             val currentHash = getHash()
@@ -42,7 +43,7 @@ internal class BLEScanner(
                 Log.w(TAG, "No scan result!")
                 return
             }
-            results.add(result.device.address)
+            timeLastResult = System.currentTimeMillis().milliseconds
             Log.d(TAG, "ScanResult: ct [$callbackType] - ${result.device.address}/${result.device.name}")
             onScanResult(result)
         }
@@ -56,21 +57,24 @@ internal class BLEScanner(
         }
     }
 
-    private fun restartByTimeout(scanSettings: ScanSettings) {
+    private fun restartByTimeout(hash: String, scanSettings: ScanSettings) {
         scope.launch {
             val timeMax = 3.seconds
             val timeDelay = 100.milliseconds
-            val timeStart = System.currentTimeMillis().milliseconds
             withContext(Dispatchers.Default) {
-                while (timeoutUntil()) {
-                    if (results.isNotEmpty()) break
+                while (scanCallback.get()?.getHash() == hash && timeoutUntil()) {
                     val timeNow = System.currentTimeMillis().milliseconds
-                    val diff = timeNow - timeStart
+                    val diff = timeNow - timeLastResult
                     if (diff > timeMax) {
-                        Log.w(TAG, "$diff have passed since the scan started. No results, so lets stop scan and start again.")
+                        Log.w(TAG, "$diff have passed since the BLE device was last listened to. No new results, so let's stop scanning and start again.")
                         stop()
                         start(scanSettings)
                         break
+                    }
+                    if (diff.inWholeMilliseconds - diff.inWholeSeconds * 1_000 < timeDelay.inWholeMilliseconds) {
+                        if (diff.inWholeSeconds > 0) {
+                            Log.i(TAG, "I haven't heard a single BLE device for ${diff.inWholeSeconds} seconds....")
+                        }
                     }
                     delay(timeDelay)
                 }
@@ -82,7 +86,8 @@ internal class BLEScanner(
         val callback = InternalScanCallback()
         if (scanCallback.getAndSet(callback) != null) TODO("Scan already started. But callback exists!")
         context.scanStart(callback, scanSettings)
-        restartByTimeout(scanSettings)
+        timeLastResult = System.currentTimeMillis().milliseconds
+        restartByTimeout(hash = callback.getHash(), scanSettings)
     }
 
     fun stop() = synchronized(BLEScanner::class.java) {
@@ -92,7 +97,6 @@ internal class BLEScanner(
             return
         }
         context.scanStop(callback)
-        results.clear()
     }
 
     companion object {

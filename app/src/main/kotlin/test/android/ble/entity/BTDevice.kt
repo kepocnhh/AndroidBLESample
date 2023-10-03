@@ -1,6 +1,6 @@
 package test.android.ble.entity
 
-internal class BTDevice(
+internal data class BTDevice(
     val address: String,
     val name: String,
 )

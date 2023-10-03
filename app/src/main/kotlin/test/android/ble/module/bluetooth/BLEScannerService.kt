@@ -2,7 +2,6 @@ package test.android.ble.module.bluetooth
 
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
@@ -25,8 +24,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import test.android.ble.entity.BTDevice
 import test.android.ble.util.ForegroundUtil
-import test.android.ble.util.android.scanStart
-import test.android.ble.util.android.scanStop
 
 internal class BLEScannerService : Service() {
     sealed interface Broadcast {
@@ -45,37 +42,6 @@ internal class BLEScannerService : Service() {
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Main + job)
-    private val callback = object : ScanCallback() {
-        override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            if (result == null) {
-                Log.w(TAG, "No scan result!")
-                return
-            }
-            Log.d(TAG, "ScanResult: ct [$callbackType] - ${result.device.address}/${result.device.name}")
-            val scanRecord = result.scanRecord ?: return
-            val device = result.device ?: return
-            val btDevice = BTDevice(
-                address = device.address ?: return,
-                name = device.name ?: return,
-            )
-            val rawData = scanRecord.bytes ?: return
-            scope.launch {
-                _broadcast.emit(
-                    Broadcast.OnBTDevice(btDevice, rawData = rawData),
-                )
-            }
-        }
-
-        override fun onBatchScanResults(results: MutableList<ScanResult>?) {
-            Log.d(TAG, "on batch scan results: $results")
-            // todo
-        }
-
-        override fun onScanFailed(errorCode: Int) {
-            Log.w(TAG, "error: $errorCode")
-            // todo
-        }
-    }
     private val receivers = object : BroadcastReceiver() {
         private fun onReceive(intent: Intent) {
             when (intent.action) {
@@ -115,6 +81,29 @@ internal class BLEScannerService : Service() {
             if (intent != null) onReceive(intent)
         }
     }
+    private val scanner = BLEScanner(
+        context = this,
+        scope = scope,
+        onScanResult = ::onScanResult,
+        timeoutUntil = {
+            state.value != State.STOPPED
+        },
+    )
+
+    private fun onScanResult(result: ScanResult) {
+        val scanRecord = result.scanRecord ?: return
+        val device = result.device ?: return
+        val btDevice = BTDevice(
+            address = device.address ?: return,
+            name = device.name ?: return,
+        )
+        val rawData = scanRecord.bytes ?: return
+        scope.launch {
+            _broadcast.emit(
+                Broadcast.OnBTDevice(btDevice, rawData = rawData),
+            )
+        }
+    }
 
     private fun onScanStart(scanSettings: ScanSettings) {
         val service: Service = this
@@ -122,7 +111,7 @@ internal class BLEScannerService : Service() {
             _state.value = State.NONE
             runCatching {
                 withContext(Dispatchers.Default) {
-                    scanStart(callback, scanSettings)
+                    scanner.start(scanSettings)
                 }
             }.fold(
                 onSuccess = {
@@ -154,7 +143,7 @@ internal class BLEScannerService : Service() {
             _state.value = State.NONE
             runCatching {
                 withContext(Dispatchers.Default) {
-                    scanStop(callback)
+                    scanner.stop()
                 }
             }.fold(
                 onSuccess = {
