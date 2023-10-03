@@ -273,6 +273,7 @@ private fun Characteristics(
     val context = LocalContext.current
     val selectedServiceState = remember { mutableStateOf<UUID?>(null) }
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
+    val characteristicOptionsState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
     DialogListSelect(
         visible = writeState.value,
         onDismissRequest = {
@@ -300,12 +301,47 @@ private fun Characteristics(
             selectedCharacteristicState.value = selectedServiceState.value!! to it
         },
         onLongClick = {
+            characteristicOptionsState.value = selectedServiceState.value!! to it
             BLEGattService.Profile.setCharacteristicNotification(
                 context = context,
                 service = selectedServiceState.value!!,
                 characteristic = it,
                 value = true,
             )
+        },
+    )
+    DialogListSelect(
+        visible = characteristicOptionsState.value != null,
+        onDismissRequest = {
+            characteristicOptionsState.value = null
+        },
+        title = "Select option:",
+        itemsSupplier = {
+            listOf(
+                "notification",
+                "read",
+            )
+        },
+        onSelect = {
+            val (service, characteristic) = characteristicOptionsState.value!!
+            when (it) {
+                "notification" -> {
+                    BLEGattService.Profile.setCharacteristicNotification(
+                        context = context,
+                        service = service,
+                        characteristic = characteristic,
+                        value = true,
+                    )
+                }
+                "read" -> {
+                    BLEGattService.Profile.readCharacteristic(
+                        context = context,
+                        service = service,
+                        characteristic = characteristic,
+                    )
+                }
+                else -> TODO()
+            }
         },
     )
     DialogEnterBytes(
@@ -442,18 +478,38 @@ private fun Descriptors(
     )
 }
 
+private class Operation(
+    val type: Type,
+    val service: UUID,
+    val characteristic: UUID,
+    val bytes: ByteArray,
+) {
+    enum class Type {
+        READ,
+        CHANGE,
+    }
+}
+
 @Composable
-internal fun LastChanged(
+private fun LastValue(
     modifier: Modifier,
-    service: UUID,
-    characteristic: UUID,
-    bytes: ByteArray,
+    operation: Operation,
 ) {
     Column(modifier = modifier) {
         BasicText(
             modifier = Modifier
                 .fillMaxWidth(),
-            text = service.toString(),
+            text = operation.type.name,
+            maxLines = 1,
+            style = TextStyle(
+                color = Color.Black,
+                fontSize = 12.sp,
+            ),
+        )
+        BasicText(
+            modifier = Modifier
+                .fillMaxWidth(),
+            text = operation.service.toString(),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
@@ -465,7 +521,7 @@ internal fun LastChanged(
         BasicText(
             modifier = Modifier
                 .fillMaxWidth(),
-            text = characteristic.toString(),
+            text = operation.characteristic.toString(),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
@@ -479,7 +535,7 @@ internal fun LastChanged(
                 .fillMaxWidth()
                 .height(32.dp)
                 .wrapContentHeight(),
-            text = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes)),
+            text = String.format("%0${operation.bytes.size * 2}x", BigInteger(1, operation.bytes)),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
@@ -630,7 +686,7 @@ internal fun DeviceScreen(
             }
         }
     }
-    val lastChangedState = remember { mutableStateOf<Triple<UUID, UUID, ByteArray>?>(null) }
+    val lastOperationState = remember { mutableStateOf<Operation?>(null) }
     LaunchedEffect(Unit) {
         BLEGattService.broadcast.collect { broadcast ->
             when (broadcast) {
@@ -657,7 +713,10 @@ internal fun DeviceScreen(
                         is GattException -> {
                             when (broadcast.error.type) {
                                 GattException.Type.WRITING_WAS_NOT_INITIATED -> {
-                                    // todo
+                                    context.showToast("Writing was not initiated!")
+                                }
+                                GattException.Type.READING_WAS_NOT_INITIATED -> {
+                                    context.showToast("Reading was not initiated!")
                                 }
                                 GattException.Type.DISCONNECTING_BY_TIMEOUT -> {
                                     context.showToast("Disconnecting by timeout!")
@@ -691,7 +750,7 @@ internal fun DeviceScreen(
                     )
                 }
                 BLEGattService.Broadcast.OnDisconnect -> {
-                    lastChangedState.value = null
+                    lastOperationState.value = null
                     context.showToast("Disconnected.")
                 }
                 is BLEGattService.Broadcast.OnConnect -> {
@@ -704,7 +763,7 @@ internal fun DeviceScreen(
         BLEGattService.Profile.broadcast.collect { broadcast ->
             when (broadcast) {
                 is BLEGattService.Profile.Broadcast.OnReadCharacteristic -> {
-                    // todo
+                    lastOperationState.value = Operation(Operation.Type.READ, service = broadcast.service, characteristic = broadcast.characteristic, broadcast.bytes)
                 }
                 is BLEGattService.Profile.Broadcast.OnWriteCharacteristic -> {
                     val bytes = broadcast.bytes
@@ -720,7 +779,7 @@ internal fun DeviceScreen(
                     // todo
                 }
                 is BLEGattService.Profile.Broadcast.OnChangeCharacteristic -> {
-                    lastChangedState.value = Triple(broadcast.service, broadcast.characteristic, broadcast.bytes)
+                    lastOperationState.value = Operation(Operation.Type.CHANGE, service = broadcast.service, characteristic = broadcast.characteristic, broadcast.bytes)
                 }
                 is BLEGattService.Profile.Broadcast.OnSetCharacteristicNotification -> {
                     Log.d(TAG, "set ${broadcast.service}/${broadcast.characteristic} notification: ${broadcast.value}")
@@ -757,16 +816,13 @@ internal fun DeviceScreen(
                 fontFamily = FontFamily.Monospace,
             ),
         )
-        val lastChanged = lastChangedState.value
-        if (lastChanged != null) {
-            val (service, characteristic, bytes) = lastChanged
-            LastChanged(
+        val lastOperation = lastOperationState.value
+        if (lastOperation != null) {
+            LastValue(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 8.dp, end = 8.dp),
-                service = service,
-                characteristic = characteristic,
-                bytes = bytes,
+                operation = lastOperation,
             )
         }
         Spacer(
@@ -780,7 +836,7 @@ internal fun DeviceScreen(
                 is BLEGattService.State.Connected -> {
                     val isReady = gattState.type == BLEGattService.State.Connected.Type.READY
                     Button(
-                        text = "write characteristic",
+                        text = "characteristics",
                         enabled = isReady && gattState.isPaired,
                         onClick = {
                             writeCharacteristicsState.value = true

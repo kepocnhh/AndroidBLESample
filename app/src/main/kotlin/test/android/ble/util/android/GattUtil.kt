@@ -6,6 +6,7 @@ import java.util.UUID
 internal class GattException(val type: Type): Exception() {
     enum class Type {
         WRITING_WAS_NOT_INITIATED,
+        READING_WAS_NOT_INITIATED,
         DISCONNECTING_BY_TIMEOUT,
     }
 }
@@ -36,7 +37,7 @@ internal object GattUtil {
         val characteristic = service.getCharacteristic(characteristic)
             ?: TODO("No characteristic $characteristic!")
         if (!gatt.readCharacteristic(characteristic)) {
-            TODO("GATT read C error!")
+            throw GattException(GattException.Type.READING_WAS_NOT_INITIATED)
         }
     }
 
