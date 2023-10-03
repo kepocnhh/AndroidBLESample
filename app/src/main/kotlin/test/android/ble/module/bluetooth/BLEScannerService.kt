@@ -190,7 +190,7 @@ internal class BLEScannerService : Service() {
     }
 
     companion object {
-        private const val TAG = "[BLEScanner]"
+        private const val TAG = "[BLE|SS]"
         val ACTION_SCAN_START = "${this::class.java.name}:ACTION_SCAN_START"
         val ACTION_SCAN_STOP = "${this::class.java.name}:ACTION_SCAN_STOP"
 
