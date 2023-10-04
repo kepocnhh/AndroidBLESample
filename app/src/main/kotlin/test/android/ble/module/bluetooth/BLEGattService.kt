@@ -1092,17 +1092,25 @@ internal class BLEGattService : Service() {
             else -> TODO("perform operations state type: ${state.type}")
         }
         when (operation) {
-            is ProfileOperation.ReadCharacteristic -> {
-                readCharacteristic(
-                    service = operation.service,
-                    characteristic = operation.characteristic,
-                )
-            }
             is ProfileOperation.WriteCharacteristic -> {
                 writeCharacteristic(
                     service = operation.service,
                     characteristic = operation.characteristic,
                     bytes = operation.bytes,
+                )
+            }
+            is ProfileOperation.WriteDescriptor -> {
+                writeDescriptor(
+                    service = operation.service,
+                    characteristic = operation.characteristic,
+                    descriptor = operation.descriptor,
+                    bytes = operation.bytes,
+                )
+            }
+            is ProfileOperation.ReadCharacteristic -> {
+                readCharacteristic(
+                    service = operation.service,
+                    characteristic = operation.characteristic,
                 )
             }
         }
@@ -1156,8 +1164,53 @@ internal class BLEGattService : Service() {
                 when (it) {
                     is GattException -> {
                         when (it.type) {
-                            GattException.Type.WRITING_WAS_NOT_INITIATED -> {
+                            GattException.Type.CHARACTERISTIC_WRITING_WAS_NOT_INITIATED -> {
                                 Log.w(TAG, "Writing $service/$characteristic was not initiated!")
+                            }
+                            else -> {
+                                // noop
+                            }
+                        }
+                    }
+                    else -> {
+                        TODO("write $service/$characteristic error: $it")
+                    }
+                }
+            },
+        )
+    }
+
+    private fun writeDescriptor(
+        service: UUID,
+        characteristic: UUID,
+        descriptor: UUID,
+        bytes: ByteArray,
+    ) {
+        val state = state.value
+        if (state !is State.Connected) TODO("write $descriptor of $service/$characteristic state: $state")
+        if (state.type != State.Connected.Type.OPERATING) TODO("write $descriptor of service/$characteristic state type: ${state.type}")
+        Log.d(TAG, "write $descriptor of $service/$characteristic...")
+        launchCatching(
+            block = {
+                withContext(Dispatchers.Default) {
+                    GattUtil.writeDescriptor(
+                        gatt = checkNotNull(gatt),
+                        service = service,
+                        characteristic = characteristic,
+                        descriptor = descriptor,
+                        bytes = bytes,
+                    )
+                }
+            },
+            onSuccess = {
+                // todo
+            },
+            onFailure = {
+                when (it) {
+                    is GattException -> {
+                        when (it.type) {
+                            GattException.Type.DESCRIPTOR_WRITING_WAS_NOT_INITIATED -> {
+                                Log.w(TAG, "Writing $descriptor of $service/$characteristic was not initiated!")
                             }
                             else -> {
                                 // noop
@@ -1221,7 +1274,8 @@ internal class BLEGattService : Service() {
         Log.d(TAG, "On write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
         if (state !is State.Connected) TODO("on write $service/$characteristic state: $state")
-        profileOperations.add(ProfileOperation.WriteCharacteristic(service = service, characteristic = characteristic, bytes))
+        val operation = ProfileOperation.WriteCharacteristic(service = service, characteristic = characteristic, bytes)
+        profileOperations.add(operation)
         when (state.type) {
             State.Connected.Type.READY -> {
                 performOperations()
@@ -1240,27 +1294,21 @@ internal class BLEGattService : Service() {
     ) {
         Log.d(TAG, "on write descriptor ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
-        if (state !is State.Connected) TODO("Write D state: $state")
-        _state.value = state.copy(type = State.Connected.Type.OPERATING)
-        scope.launch {
-            runCatching {
-                withContext(Dispatchers.Default) {
-                    GattUtil.writeDescriptor(
-                        gatt = checkNotNull(gatt),
-                        service = service,
-                        characteristic = characteristic,
-                        descriptor = descriptor,
-                        bytes = bytes,
-                    )
-                }
-            }.fold(
-                onSuccess = {
-                    // todo
-                },
-                onFailure = {
-                    TODO("GATT write D error: $it!")
-                },
-            )
+        if (state !is State.Connected) TODO("on write $descriptor of $service/$characteristic state: $state")
+        val operation = ProfileOperation.WriteDescriptor(
+            service = service,
+            characteristic = characteristic,
+            descriptor = descriptor,
+            bytes = bytes,
+        )
+        profileOperations.add(operation)
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                performOperations()
+            }
+            else -> {
+                // noop
+            }
         }
     }
 
@@ -1450,6 +1498,11 @@ internal class BLEGattService : Service() {
                 )
             }
             Action.WRITE_DESCRIPTOR -> {
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be written. Already disconnected.")
+                    return
+                }
                 val bytes = intent.getByteArrayExtra("bytes") ?: TODO("No bytes!")
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
@@ -1597,6 +1650,12 @@ internal class BLEGattService : Service() {
         class WriteCharacteristic(
             val service: UUID,
             val characteristic: UUID,
+            val bytes: ByteArray,
+        ) : ProfileOperation
+        class WriteDescriptor(
+            val service: UUID,
+            val characteristic: UUID,
+            val descriptor: UUID,
             val bytes: ByteArray,
         ) : ProfileOperation
         class ReadCharacteristic(

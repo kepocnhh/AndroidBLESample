@@ -478,16 +478,28 @@ private fun Descriptors(
     )
 }
 
-private class Operation(
-    val type: Type,
-    val service: UUID,
-    val characteristic: UUID,
-    val bytes: ByteArray,
-) {
-    enum class Type {
-        READ,
-        CHANGE,
-    }
+private sealed interface Operation {
+    class WriteDescriptor(
+        val service: UUID,
+        val characteristic: UUID,
+        val descriptor: UUID,
+        val bytes: ByteArray,
+    ) : Operation
+    class WriteCharacteristic(
+        val service: UUID,
+        val characteristic: UUID,
+        val bytes: ByteArray,
+    ) : Operation
+    class ReadCharacteristic(
+        val service: UUID,
+        val characteristic: UUID,
+        val bytes: ByteArray,
+    ) : Operation
+    class ChangeCharacteristic(
+        val service: UUID,
+        val characteristic: UUID,
+        val bytes: ByteArray,
+    ) : Operation
 }
 
 @Composable
@@ -496,10 +508,34 @@ private fun LastValue(
     operation: Operation,
 ) {
     Column(modifier = modifier) {
+        val name = when (operation) {
+            is Operation.ChangeCharacteristic -> "Change characteristic"
+            is Operation.ReadCharacteristic -> "Read characteristic"
+            is Operation.WriteCharacteristic -> "Write characteristic"
+            is Operation.WriteDescriptor -> "Write descriptor"
+        }
+        val service = when (operation) {
+            is Operation.ChangeCharacteristic -> operation.service
+            is Operation.ReadCharacteristic -> operation.service
+            is Operation.WriteCharacteristic -> operation.service
+            is Operation.WriteDescriptor -> operation.service
+        }
+        val characteristic = when (operation) {
+            is Operation.ChangeCharacteristic -> operation.characteristic
+            is Operation.ReadCharacteristic -> operation.characteristic
+            is Operation.WriteCharacteristic -> operation.characteristic
+            is Operation.WriteDescriptor -> operation.characteristic
+        }
+        val bytes = when (operation) {
+            is Operation.ChangeCharacteristic -> operation.bytes
+            is Operation.ReadCharacteristic -> operation.bytes
+            is Operation.WriteCharacteristic -> operation.bytes
+            is Operation.WriteDescriptor -> operation.bytes
+        }
         BasicText(
             modifier = Modifier
                 .fillMaxWidth(),
-            text = operation.type.name,
+            text = name,
             maxLines = 1,
             style = TextStyle(
                 color = Color.Black,
@@ -509,7 +545,7 @@ private fun LastValue(
         BasicText(
             modifier = Modifier
                 .fillMaxWidth(),
-            text = operation.service.toString(),
+            text = service.toString(),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
@@ -521,7 +557,7 @@ private fun LastValue(
         BasicText(
             modifier = Modifier
                 .fillMaxWidth(),
-            text = operation.characteristic.toString(),
+            text = characteristic.toString(),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
@@ -530,12 +566,30 @@ private fun LastValue(
                 fontFamily = FontFamily.Monospace,
             ),
         )
+        val descriptor = when (operation) {
+            is Operation.WriteDescriptor -> operation.descriptor
+            else -> null
+        }
+        if (descriptor != null) {
+            BasicText(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                text = descriptor.toString(),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = TextStyle(
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                ),
+            )
+        }
         BasicText(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(32.dp)
                 .wrapContentHeight(),
-            text = String.format("%0${operation.bytes.size * 2}x", BigInteger(1, operation.bytes)),
+            text = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes)),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
@@ -712,8 +766,11 @@ internal fun DeviceScreen(
                         }
                         is GattException -> {
                             when (broadcast.error.type) {
-                                GattException.Type.WRITING_WAS_NOT_INITIATED -> {
-                                    context.showToast("Writing was not initiated!")
+                                GattException.Type.CHARACTERISTIC_WRITING_WAS_NOT_INITIATED -> {
+                                    context.showToast("Characteristic writing was not initiated!")
+                                }
+                                GattException.Type.DESCRIPTOR_WRITING_WAS_NOT_INITIATED -> {
+                                    context.showToast("Descriptor writing was not initiated!")
                                 }
                                 GattException.Type.READING_WAS_NOT_INITIATED -> {
                                     context.showToast("Reading was not initiated!")
@@ -763,23 +820,42 @@ internal fun DeviceScreen(
         BLEGattService.Profile.broadcast.collect { broadcast ->
             when (broadcast) {
                 is BLEGattService.Profile.Broadcast.OnReadCharacteristic -> {
-                    lastOperationState.value = Operation(Operation.Type.READ, service = broadcast.service, characteristic = broadcast.characteristic, broadcast.bytes)
+                    lastOperationState.value = Operation.ReadCharacteristic(
+                        service = broadcast.service,
+                        characteristic = broadcast.characteristic,
+                        bytes = broadcast.bytes,
+                    )
                 }
                 is BLEGattService.Profile.Broadcast.OnWriteCharacteristic -> {
                     val bytes = broadcast.bytes
                     val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
                     viewModel.write(value)
+                    lastOperationState.value = Operation.WriteCharacteristic(
+                        service = broadcast.service,
+                        characteristic = broadcast.characteristic,
+                        bytes = broadcast.bytes,
+                    )
                 }
                 is BLEGattService.Profile.Broadcast.OnWriteDescriptor -> {
                     val bytes = broadcast.bytes
                     val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
                     viewModel.write(value)
+                    lastOperationState.value = Operation.WriteDescriptor(
+                        service = broadcast.service,
+                        characteristic = broadcast.characteristic,
+                        descriptor = broadcast.descriptor,
+                        bytes = broadcast.bytes,
+                    )
                 }
                 is BLEGattService.Profile.Broadcast.OnServicesDiscovered -> {
                     // todo
                 }
                 is BLEGattService.Profile.Broadcast.OnChangeCharacteristic -> {
-                    lastOperationState.value = Operation(Operation.Type.CHANGE, service = broadcast.service, characteristic = broadcast.characteristic, broadcast.bytes)
+                    lastOperationState.value = Operation.ChangeCharacteristic(
+                        service = broadcast.service,
+                        characteristic = broadcast.characteristic,
+                        bytes = broadcast.bytes,
+                    )
                 }
                 is BLEGattService.Profile.Broadcast.OnSetCharacteristicNotification -> {
                     Log.d(TAG, "set ${broadcast.service}/${broadcast.characteristic} notification: ${broadcast.value}")
