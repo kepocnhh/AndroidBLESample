@@ -84,8 +84,9 @@ internal class BLEScanner(
 
     fun start(scanSettings: ScanSettings) = synchronized(BLEScanner::class.java) {
         val callback = InternalScanCallback()
-        if (scanCallback.getAndSet(callback) != null) TODO("Scan already started. But callback exists!")
+        if (scanCallback.get() != null) TODO("Scan already started. But callback exists!")
         context.scanStart(callback, scanSettings)
+        scanCallback.set(callback)
         timeLastResult = System.currentTimeMillis().milliseconds
         restartByTimeout(hash = callback.getHash(), scanSettings)
     }

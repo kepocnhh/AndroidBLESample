@@ -9,7 +9,6 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
-import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
@@ -45,8 +44,6 @@ import test.android.ble.util.android.isBTEnabled
 import test.android.ble.util.android.isLocationEnabled
 import test.android.ble.util.android.removeBond
 import test.android.ble.util.android.requireBTAdapter
-import test.android.ble.util.android.scanStart
-import test.android.ble.util.android.scanStop
 import java.util.Queue
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -877,7 +874,11 @@ internal class BLEGattService : Service() {
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
-                    scanner.stop()
+                    try {
+                        scanner.stop()
+                    } catch (e: BTException) {
+                        Log.d(TAG, "scanner stop BT error: $e")
+                    }
                 }
             }.fold(
                 onSuccess = {
@@ -1083,7 +1084,7 @@ internal class BLEGattService : Service() {
         }
         when (state.type) {
             State.Connected.Type.READY -> {
-                Log.d(TAG, "Start perform operations..")
+                Log.d(TAG, "Start perform operations...")
                 _state.value = state.copy(type = State.Connected.Type.OPERATING)
             }
             State.Connected.Type.OPERATING -> {
