@@ -1,5 +1,6 @@
 package test.android.ble.module.bluetooth
 
+import android.app.Notification
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -9,7 +10,6 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
-import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
@@ -34,7 +34,6 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import test.android.ble.entity.BTDevice
-import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.GattException
 import test.android.ble.util.android.GattUtil
@@ -45,8 +44,6 @@ import test.android.ble.util.android.isBTEnabled
 import test.android.ble.util.android.isLocationEnabled
 import test.android.ble.util.android.removeBond
 import test.android.ble.util.android.requireBTAdapter
-import test.android.ble.util.android.scanStart
-import test.android.ble.util.android.scanStop
 import java.util.Queue
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -57,8 +54,6 @@ internal class BLEGattService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
         class OnPair(val result: Result<BTDevice>) : Broadcast
-        object OnDisconnect : Broadcast
-        class OnConnect(val state: State.Connected) : Broadcast
     }
 
     sealed interface State {
@@ -101,8 +96,7 @@ internal class BLEGattService : Service() {
         ) : State {
             enum class Type {
                 READY,
-                READING,
-                WRITING,
+                OPERATING,
                 PAIRING,
                 UNPAIRING,
                 DISCOVER,
@@ -112,8 +106,18 @@ internal class BLEGattService : Service() {
         object Disconnected : State
     }
 
+    sealed interface Event {
+        object OnDisconnected : Event
+        class OnConnecting(val address: String) : Event
+        class OnConnected(val address: String) : Event
+        class OnDisconnecting(val address: String) : Event
+        object OnSearchWaiting : Event
+        class OnSearchComing(val address: String) : Event
+    }
+
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Main + job)
+    private var oldState: State = State.Disconnected
     private var gatt: BluetoothGatt? = null
     private var pin: String? = null
     private var scanSettings: ScanSettings? = null
@@ -636,8 +640,8 @@ internal class BLEGattService : Service() {
     private fun onCharacteristicRead(characteristic: BluetoothGattCharacteristic) {
         val state = state.value
         if (state !is State.Connected) TODO("On characteristic read state: $state")
-        if (state.type != State.Connected.Type.READING) TODO("On characteristic read state type: ${state.type}")
-        _state.value = state.copy(type = State.Connected.Type.READY)
+        if (state.type != State.Connected.Type.OPERATING) TODO("On characteristic read state type: ${state.type}")
+        performOperations()
         scope.launch {
             _profileBroadcast.emit(
                 Profile.Broadcast.OnReadCharacteristic(
@@ -655,8 +659,8 @@ internal class BLEGattService : Service() {
             Log.d(TAG, "The writing results are no longer relevant. Disconnected.")
             return
         }
-        if (state.type != State.Connected.Type.WRITING) TODO("on characteristic write state type: ${state.type}")
-        writeCharacteristics()
+        if (state.type != State.Connected.Type.OPERATING) TODO("on characteristic write state type: ${state.type}")
+        performOperations()
         scope.launch {
             _profileBroadcast.emit(
                 Profile.Broadcast.OnWriteCharacteristic(
@@ -671,7 +675,7 @@ internal class BLEGattService : Service() {
     private fun onDescriptorWrite(descriptor: BluetoothGattDescriptor) {
         val state = state.value
         if (state !is State.Connected) TODO("On descriptor write state: $state")
-        if (state.type != State.Connected.Type.WRITING) TODO("On descriptor write state type: ${state.type}")
+        if (state.type != State.Connected.Type.OPERATING) TODO("On descriptor write state type: ${state.type}")
         _state.value = state.copy(type = State.Connected.Type.READY)
         scope.launch {
             _profileBroadcast.emit(
@@ -714,12 +718,6 @@ internal class BLEGattService : Service() {
         if (state !is State.Connecting) TODO()
         if (state.type != State.Connecting.Type.DISCOVER) TODO()
         val service = this
-        ForegroundUtil.startForeground(
-            service = service,
-            title = "connected ${state.address}",
-            action = "disconnect",
-            intent = intent(service, Action.DISCONNECT),
-        )
         _state.value = State.Connected(
             address = state.address,
             isPaired = gatt.device.bondState == BluetoothDevice.BOND_BONDED,
@@ -825,12 +823,6 @@ internal class BLEGattService : Service() {
             }
         }.fold(
             onSuccess = {
-                ForegroundUtil.startForeground(
-                    service = service,
-                    title = "searching ${state.address}...",
-                    action = "stop",
-                    intent = intent(service, Action.SEARCH_STOP),
-                )
                 _state.value = State.Search(
                     address = state.address,
                     type = State.Search.Type.COMING,
@@ -852,18 +844,9 @@ internal class BLEGattService : Service() {
             if (runCatching { isBTEnabled() }.getOrDefault(false) && isLocationEnabled()) {
                 toComing()
             } else {
-                startForegroundWaiting()
+//                startForegroundWaiting()
             }
         }
-    }
-
-    private fun startForegroundWaiting() {
-        ForegroundUtil.startForeground(
-            service = this,
-            title = "search waiting...",
-            action = "stop",
-            intent = intent(this, Action.SEARCH_STOP),
-        )
     }
 
     private fun toWaiting() {
@@ -878,7 +861,11 @@ internal class BLEGattService : Service() {
         scope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
-                    scanner.stop()
+                    try {
+                        scanner.stop()
+                    } catch (e: BTException) {
+                        Log.d(TAG, "scanner stop BT error: $e")
+                    }
                 }
             }.fold(
                 onSuccess = {
@@ -886,7 +873,7 @@ internal class BLEGattService : Service() {
                         address = state.address,
                         type = State.Search.Type.WAITING,
                     )
-                    startForegroundWaiting()
+//                    startForegroundWaiting()
                 },
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
@@ -925,10 +912,6 @@ internal class BLEGattService : Service() {
         val address = state.address
         _state.value = State.Connecting(address = address, type = State.Connecting.Type.CONNECTS)
         val service: Service = this
-        ForegroundUtil.startForeground(
-            service = service,
-            title = "connecting $address...",
-        )
         launchCatching(
             block = {
                 withContext(Dispatchers.Default) {
@@ -1012,10 +995,6 @@ internal class BLEGattService : Service() {
         val address = state.address
         val service: Service = this
         _state.value = State.Disconnecting(address = address)
-        ForegroundUtil.startForeground(
-            service = service,
-            title = "disconnecting $address...",
-        )
         scope.launch {
             runCatching {
                 val gatt = checkNotNull(gatt)
@@ -1061,47 +1040,94 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private val profileOperations: Queue<ProfileOperation> = ConcurrentLinkedQueue() // todo type
+    private fun performOperations() {
+        val state = state.value
+        if (state !is State.Connected) TODO("perform operations state: $state")
+        val operation = profileOperations.poll()
+        if (operation == null) {
+            when (state.type) {
+                State.Connected.Type.READY -> {
+                    Log.d(TAG, "All operations already performed.")
+                    return
+                }
+                State.Connected.Type.OPERATING -> {
+                    _state.value = state.copy(type = State.Connected.Type.READY)
+                    Log.d(TAG, "All operations performed.")
+                    return
+                }
+                else -> {
+                    TODO("State: $state. Type: ${state.type}. But no operation!")
+                }
+            }
+        }
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                Log.d(TAG, "Start perform operations...")
+                _state.value = state.copy(type = State.Connected.Type.OPERATING)
+            }
+            State.Connected.Type.OPERATING -> {
+                // noop
+            }
+            else -> TODO("perform operations state type: ${state.type}")
+        }
+        when (operation) {
+            is ProfileOperation.WriteCharacteristic -> {
+                writeCharacteristic(
+                    service = operation.service,
+                    characteristic = operation.characteristic,
+                    bytes = operation.bytes,
+                )
+            }
+            is ProfileOperation.WriteDescriptor -> {
+                writeDescriptor(
+                    service = operation.service,
+                    characteristic = operation.characteristic,
+                    descriptor = operation.descriptor,
+                    bytes = operation.bytes,
+                )
+            }
+            is ProfileOperation.ReadCharacteristic -> {
+                readCharacteristic(
+                    service = operation.service,
+                    characteristic = operation.characteristic,
+                )
+            }
+        }
+    }
     private fun onReadCharacteristic(
         service: UUID,
         characteristic: UUID,
     ) {
-        Log.d(TAG, "on read characteristic $service/$characteristic...")
+        Log.d(TAG, "On read $service/$characteristic...")
         val state = state.value
-        if (state !is State.Connected) TODO("Read C state: $state")
-        if (state.type != State.Connected.Type.READY) TODO("Read C state type: ${state.type}")
-        _state.value = state.copy(type = State.Connected.Type.READING)
-        scope.launch {
-            runCatching {
-                withContext(Dispatchers.Default) {
-                    GattUtil.readCharacteristic(
-                        gatt = checkNotNull(gatt),
-                        service = service,
-                        characteristic = characteristic,
-                    )
-                }
-            }.fold(
-                onSuccess = {
-                    // todo
-                },
-                onFailure = {
-                    TODO("GATT read C error: $it!")
-                },
-            )
+        if (state !is State.Connected) TODO("on read $service/$characteristic state: $state")
+        val operation = ProfileOperation.ReadCharacteristic(
+            service = service,
+            characteristic = characteristic,
+        )
+        profileOperations.add(operation)
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                performOperations()
+            }
+            else -> {
+                // noop
+            }
         }
     }
 
-    private val characteristicsToWrite: Queue<Triple<UUID, UUID, ByteArray>> = ConcurrentLinkedQueue()
-    private fun writeCharacteristics(
+    private fun writeCharacteristic(
         service: UUID,
         characteristic: UUID,
         bytes: ByteArray,
     ) {
         val state = state.value
         if (state !is State.Connected) TODO("write $service/$characteristic state: $state")
-        if (state.type != State.Connected.Type.WRITING) TODO("write $service/$characteristic state type: ${state.type}")
-        Log.d(TAG, "on write $service/$characteristic...")
-        scope.launch {
-            runCatching {
+        if (state.type != State.Connected.Type.OPERATING) TODO("write $service/$characteristic state type: ${state.type}")
+        Log.d(TAG, "write $service/$characteristic...")
+        launchCatching(
+            block = {
                 withContext(Dispatchers.Default) {
                     GattUtil.writeCharacteristic(
                         gatt = checkNotNull(gatt),
@@ -1110,51 +1136,114 @@ internal class BLEGattService : Service() {
                         bytes = bytes,
                     )
                 }
-            }.fold(
-                onSuccess = {
-                    // todo
-                },
-                onFailure = {
-                    when (it) {
-                        is GattException -> {
-                            when (it.type) {
-                                GattException.Type.WRITING_WAS_NOT_INITIATED -> {
-                                    Log.w(TAG, "Writing $service/$characteristic was not initiated!")
-                                }
-                                else -> {
-                                    // noop
-                                }
+            },
+            onSuccess = {
+                // todo
+            },
+            onFailure = {
+                when (it) {
+                    is GattException -> {
+                        when (it.type) {
+                            GattException.Type.CHARACTERISTIC_WRITING_WAS_NOT_INITIATED -> {
+                                Log.w(TAG, "Writing $service/$characteristic was not initiated!")
+                            }
+                            else -> {
+                                // noop
                             }
                         }
-                        else -> {
-                            TODO("write $service/$characteristic error: $it")
+                    }
+                    else -> {
+                        TODO("write $service/$characteristic error: $it")
+                    }
+                }
+            },
+        )
+    }
+
+    private fun writeDescriptor(
+        service: UUID,
+        characteristic: UUID,
+        descriptor: UUID,
+        bytes: ByteArray,
+    ) {
+        val state = state.value
+        if (state !is State.Connected) TODO("write $descriptor of $service/$characteristic state: $state")
+        if (state.type != State.Connected.Type.OPERATING) TODO("write $descriptor of service/$characteristic state type: ${state.type}")
+        Log.d(TAG, "write $descriptor of $service/$characteristic...")
+        launchCatching(
+            block = {
+                withContext(Dispatchers.Default) {
+                    GattUtil.writeDescriptor(
+                        gatt = checkNotNull(gatt),
+                        service = service,
+                        characteristic = characteristic,
+                        descriptor = descriptor,
+                        bytes = bytes,
+                    )
+                }
+            },
+            onSuccess = {
+                // todo
+            },
+            onFailure = {
+                when (it) {
+                    is GattException -> {
+                        when (it.type) {
+                            GattException.Type.DESCRIPTOR_WRITING_WAS_NOT_INITIATED -> {
+                                Log.w(TAG, "Writing $descriptor of $service/$characteristic was not initiated!")
+                            }
+                            else -> {
+                                // noop
+                            }
                         }
                     }
-                },
-            )
-        }
-    }
-    private fun writeCharacteristics() {
-        val state = state.value
-        if (state !is State.Connected) TODO("write characteristics state: $state")
-        val triple = characteristicsToWrite.poll()
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                if (triple == null) return
-                _state.value = state.copy(type = State.Connected.Type.WRITING)
-                val (service, characteristic, bytes) = triple
-                writeCharacteristics(service = service, characteristic = characteristic, bytes = bytes)
-            }
-            State.Connected.Type.WRITING -> {
-                if (triple == null) {
-                    _state.value = state.copy(type = State.Connected.Type.READY)
-                    return
+                    else -> {
+                        TODO("write $service/$characteristic error: $it")
+                    }
                 }
-                val (service, characteristic, bytes) = triple
-                writeCharacteristics(service = service, characteristic = characteristic, bytes = bytes)
-            }
-            else -> TODO("write characteristics state type: ${state.type}")
-        }
+            },
+        )
+    }
+
+    private fun readCharacteristic(
+        service: UUID,
+        characteristic: UUID,
+    ) {
+        val state = state.value
+        if (state !is State.Connected) TODO("read $service/$characteristic state: $state")
+        if (state.type != State.Connected.Type.OPERATING) TODO("read $service/$characteristic state type: ${state.type}")
+        Log.d(TAG, "read $service/$characteristic...")
+        launchCatching(
+            block = {
+                withContext(Dispatchers.Default) {
+                    GattUtil.readCharacteristic(
+                        gatt = checkNotNull(gatt),
+                        service = service,
+                        characteristic = characteristic,
+                    )
+                }
+            },
+            onSuccess = {
+                // todo
+            },
+            onFailure = {
+                when (it) {
+                    is GattException -> {
+                        when (it.type) {
+                            GattException.Type.READING_WAS_NOT_INITIATED -> {
+                                Log.w(TAG, "Reading $service/$characteristic was not initiated!")
+                            }
+                            else -> {
+                                // noop
+                            }
+                        }
+                    }
+                    else -> {
+                        TODO("read $service/$characteristic error: $it")
+                    }
+                }
+            },
+        )
     }
 
     private fun onWriteCharacteristic(
@@ -1165,15 +1254,15 @@ internal class BLEGattService : Service() {
         Log.d(TAG, "On write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
         if (state !is State.Connected) TODO("on write $service/$characteristic state: $state")
+        val operation = ProfileOperation.WriteCharacteristic(service = service, characteristic = characteristic, bytes)
+        profileOperations.add(operation)
         when (state.type) {
             State.Connected.Type.READY -> {
-                characteristicsToWrite.add(Triple(service, characteristic, bytes))
-                writeCharacteristics()
+                performOperations()
             }
-            State.Connected.Type.WRITING -> {
-                characteristicsToWrite.add(Triple(service, characteristic, bytes))
+            else -> {
+                // noop
             }
-            else -> TODO("on write $service/$characteristic state type: ${state.type}")
         }
     }
 
@@ -1185,27 +1274,21 @@ internal class BLEGattService : Service() {
     ) {
         Log.d(TAG, "on write descriptor ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
-        if (state !is State.Connected) TODO("Write D state: $state")
-        _state.value = state.copy(type = State.Connected.Type.WRITING)
-        scope.launch {
-            runCatching {
-                withContext(Dispatchers.Default) {
-                    GattUtil.writeDescriptor(
-                        gatt = checkNotNull(gatt),
-                        service = service,
-                        characteristic = characteristic,
-                        descriptor = descriptor,
-                        bytes = bytes,
-                    )
-                }
-            }.fold(
-                onSuccess = {
-                    // todo
-                },
-                onFailure = {
-                    TODO("GATT write D error: $it!")
-                },
-            )
+        if (state !is State.Connected) TODO("on write $descriptor of $service/$characteristic state: $state")
+        val operation = ProfileOperation.WriteDescriptor(
+            service = service,
+            characteristic = characteristic,
+            descriptor = descriptor,
+            bytes = bytes,
+        )
+        profileOperations.add(operation)
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                performOperations()
+            }
+            else -> {
+                // noop
+            }
         }
     }
 
@@ -1395,6 +1478,11 @@ internal class BLEGattService : Service() {
                 )
             }
             Action.WRITE_DESCRIPTOR -> {
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be written. Already disconnected.")
+                    return
+                }
                 val bytes = intent.getByteArrayExtra("bytes") ?: TODO("No bytes!")
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
@@ -1420,6 +1508,13 @@ internal class BLEGattService : Service() {
                 onPair(pin)
             }
             Action.UNPAIR -> onUnpair()
+            Action.START_FOREGROUND -> {
+                if (!intent.hasExtra("notificationId")) TODO()
+                val notificationId = intent.getIntExtra("notificationId", -1)
+                if (!intent.hasExtra("notification")) TODO()
+                val notification = intent.getParcelableExtra<Notification>("notification") ?: TODO()
+                startForeground(notificationId, notification)
+            }
             else -> TODO("Unknown action: ${intent.action}!")
         }
     }
@@ -1434,72 +1529,85 @@ internal class BLEGattService : Service() {
         return null
     }
 
-    private fun onNewState(oldState: State, newState: State) {
-        if (oldState is State.Connected) {
-            if (newState is State.Connected) {
-                when (oldState.type) {
-                    State.Connected.Type.READY -> {
-                        when (newState.type) {
-                            State.Connected.Type.PAIRING -> {
-                                val filter = IntentFilter().also {
-                                    if (pin != null) {
-                                        it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
-                                    }
-                                    it.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
-                                }
-                                registerReceiver(receiversPairing, filter)
-                            }
-                            else -> {
-                                // noop
-                            }
-                        }
-                    }
-                    State.Connected.Type.PAIRING -> {
-                        when (newState.type) {
-                            State.Connected.Type.PAIRING -> {
-                                // noop
-                            }
-                            else -> {
-                                unregisterReceiver(receiversPairing)
-                            }
-                        }
-                    }
-                    else -> {
-                        // noop
-                    }
-                }
-            } else {
-                unregisterReceiver(receiversConnected)
-            }
-        } else {
-            if (newState is State.Connected) {
-                val filter = IntentFilter().also {
-                    it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
-                    it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
-                    it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-                }
-                registerReceiver(receiversConnected, filter)
-                scope.launch {
-                    _broadcast.emit(Broadcast.OnConnect(newState))
+    private suspend fun onState(newState: State) {
+        val oldState = oldState
+        this.oldState = newState
+        when (oldState) {
+            is State.Connected -> {
+                if (newState !is State.Connected) {
+                    unregisterReceiver(receiversConnected)
                 }
             }
-        }
-        if (oldState is State.Disconnected) {
-            if (newState !is State.Disconnected) {
+            State.Disconnected -> {
+                if (newState is State.Disconnected) return
                 val filter = IntentFilter().also {
                     it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
                     it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
                 }
                 registerReceiver(receivers, filter)
             }
-        } else {
-            if (newState is State.Disconnected) {
+            else -> {
+                // noop
+            }
+        }
+        when (newState) {
+            is State.Connected -> {
+                if (oldState is State.Connected) {
+                    when (newState.type) {
+                        State.Connected.Type.PAIRING -> {
+                            if (oldState.type != State.Connected.Type.READY) return
+                            val filter = IntentFilter().also {
+                                if (pin != null) {
+                                    it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
+                                }
+                                it.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
+                            }
+                            registerReceiver(receiversPairing, filter)
+                        }
+                        else -> {
+                            if (oldState.type != State.Connected.Type.PAIRING) return
+                            unregisterReceiver(receiversPairing)
+                        }
+                    }
+                } else {
+                    _event.emit(Event.OnConnected(address = newState.address))
+                    val filter = IntentFilter().also {
+                        it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
+                        it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                        it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+                    }
+                    registerReceiver(receiversConnected, filter)
+                }
+            }
+            is State.Connecting -> {
+                if (oldState is State.Connecting) return
+                _event.emit(Event.OnConnecting(address = newState.address))
+            }
+            State.Disconnected -> {
+                if (oldState is State.Disconnected) return
+                _event.emit(Event.OnDisconnected)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 unregisterReceiver(receivers)
-                scope.launch {
-                    _broadcast.emit(Broadcast.OnDisconnect)
-                }
                 scanSettings = null
+            }
+            is State.Disconnecting -> {
+                if (oldState is State.Disconnecting) return
+                _event.emit(Event.OnDisconnecting(address = newState.address))
+            }
+            is State.Search -> {
+                when (newState.type) {
+                    State.Search.Type.WAITING -> {
+                        if (oldState is State.Search && oldState.type == State.Search.Type.WAITING) return
+                        _event.emit(Event.OnSearchWaiting)
+                    }
+                    State.Search.Type.COMING -> {
+                        if (oldState is State.Search && oldState.type == State.Search.Type.COMING) return
+                        _event.emit(Event.OnSearchComing(address = newState.address))
+                    }
+                    else -> {
+                        // noop
+                    }
+                }
             }
         }
     }
@@ -1508,14 +1616,15 @@ internal class BLEGattService : Service() {
         super.onCreate()
         Log.d(TAG, "on create[${hashCode()}]...") // todo
         state
-            .onEach { newState ->
-                oldState.also {
-                    if (it != newState) {
-                        onNewState(it, newState)
-                        oldState = newState
-                    }
-                }
-            }
+            .onEach(::onState)
+//            .onEach { newState ->
+//                oldState.also {
+//                    if (it != newState) {
+//                        onNewState(it, newState)
+//                        oldState = newState
+//                    }
+//                }
+//            }
             .launchIn(scope)
     }
 
@@ -1525,7 +1634,7 @@ internal class BLEGattService : Service() {
         job.cancel()
     }
 
-    private enum class Action {
+    enum class Action {
         CONNECT,
         DISCONNECT,
         SEARCH_STOP,
@@ -1536,6 +1645,25 @@ internal class BLEGattService : Service() {
         WRITE_DESCRIPTOR,
         PAIR,
         UNPAIR,
+        START_FOREGROUND,
+    }
+
+    private sealed interface ProfileOperation {
+        class WriteCharacteristic(
+            val service: UUID,
+            val characteristic: UUID,
+            val bytes: ByteArray,
+        ) : ProfileOperation
+        class WriteDescriptor(
+            val service: UUID,
+            val characteristic: UUID,
+            val descriptor: UUID,
+            val bytes: ByteArray,
+        ) : ProfileOperation
+        class ReadCharacteristic(
+            val service: UUID,
+            val characteristic: UUID,
+        ) : ProfileOperation
     }
 
     object Profile {
@@ -1638,14 +1766,17 @@ internal class BLEGattService : Service() {
         @JvmStatic
         val broadcast = _broadcast.asSharedFlow()
 
-        private var oldState: State = State.Disconnected
+        private val _event = MutableSharedFlow<Event>()
+        @JvmStatic
+        val event = _event.asSharedFlow()
+
         private val _state = MutableStateFlow<State>(State.Disconnected)
         @JvmStatic
         val state = _state.asStateFlow()
 
         private val _profileBroadcast = MutableSharedFlow<Profile.Broadcast>()
 
-        private fun intent(context: Context, action: Action): Intent {
+        fun intent(context: Context, action: Action): Intent {
             val intent = Intent(context, BLEGattService::class.java)
             intent.action = action.name
             return intent
@@ -1685,6 +1816,14 @@ internal class BLEGattService : Service() {
 
         fun unpair(context: Context) {
             val intent = intent(context, Action.UNPAIR)
+            context.startService(intent)
+        }
+
+        @JvmStatic
+        fun startForeground(context: Context, notificationId: Int, notification: Notification) {
+            val intent = intent(context, Action.START_FOREGROUND)
+            intent.putExtra("notificationId", notificationId)
+            intent.putExtra("notification", notification)
             context.startService(intent)
         }
     }

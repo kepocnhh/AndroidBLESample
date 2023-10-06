@@ -5,7 +5,9 @@ import java.util.UUID
 
 internal class GattException(val type: Type): Exception() {
     enum class Type {
-        WRITING_WAS_NOT_INITIATED,
+        CHARACTERISTIC_WRITING_WAS_NOT_INITIATED,
+        DESCRIPTOR_WRITING_WAS_NOT_INITIATED,
+        READING_WAS_NOT_INITIATED,
         DISCONNECTING_BY_TIMEOUT,
     }
 }
@@ -36,7 +38,7 @@ internal object GattUtil {
         val characteristic = service.getCharacteristic(characteristic)
             ?: TODO("No characteristic $characteristic!")
         if (!gatt.readCharacteristic(characteristic)) {
-            TODO("GATT read C error!")
+            throw GattException(GattException.Type.READING_WAS_NOT_INITIATED)
         }
     }
 
@@ -54,7 +56,7 @@ internal object GattUtil {
             TODO("Characteristic set value error!")
         }
         if (!gatt.writeCharacteristic(characteristic)) {
-            throw GattException(GattException.Type.WRITING_WAS_NOT_INITIATED)
+            throw GattException(GattException.Type.CHARACTERISTIC_WRITING_WAS_NOT_INITIATED)
         }
     }
 
@@ -70,12 +72,12 @@ internal object GattUtil {
         val characteristic = service.getCharacteristic(characteristic)
             ?: TODO("No characteristic ${service.uuid}/$characteristic!")
         val descriptor = characteristic.getDescriptor(descriptor)
-            ?: TODO("No descriptor ${service.uuid}/${characteristic.uuid}/$descriptor!")
+            ?: TODO("No descriptor $descriptor of ${service.uuid}/${characteristic.uuid}!")
         if (!descriptor.setValue(bytes)) {
             TODO("Descriptor set value error!")
         }
         if (!gatt.writeDescriptor(descriptor)) {
-            TODO("GATT write D error!")
+            throw GattException(GattException.Type.DESCRIPTOR_WRITING_WAS_NOT_INITIATED)
         }
     }
 }

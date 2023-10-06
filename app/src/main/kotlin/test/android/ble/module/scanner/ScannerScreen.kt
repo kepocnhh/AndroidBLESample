@@ -118,6 +118,7 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                                 BLEScannerService.State.STARTED -> {
                                     BLEScannerService.scanStop(context)
                                 }
+
                                 else -> {
                                     // noop
                                 }
@@ -169,9 +170,11 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                             BLEScannerService.State.STARTED -> {
                                 BLEScannerService.scanStop(context)
                             }
+
                             BLEScannerService.State.STOPPED -> {
                                 BLEScannerService.scanStart(context, scanSettings = scanSettings)
                             }
+
                             else -> {
                                 // noop
                             }
