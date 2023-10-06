@@ -80,13 +80,16 @@ internal class App : Application() {
             when (intent.action) {
                 ForegroundUtil.ACTION_CLICK -> {
                     println("[App]: resumed: " + resumed.map { it::class.java.simpleName })
+                    if (resumed.any { it.window.decorView.isShown }) return
                     val activity = resumed.peek()
                     if (activity == null) {
                         val intent = Intent(this@App, MainActivity::class.java)
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         startActivity(intent)
                     } else {
-                        // todo
+                        val intent = Intent(this@App, activity::class.java)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // android:launchMode="singleInstance"
+                        startActivity(intent)
                     }
                 }
                 else -> {
