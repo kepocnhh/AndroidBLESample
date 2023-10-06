@@ -102,6 +102,8 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                             val notification = ForegroundUtil.buildNotification(
                                 context = context,
                                 title = "scanning...",
+                                action = "stop",
+                                intent = ForegroundUtil.getService(context, intent),
                             )
                             ForegroundUtil.notify(context, notification)
                             BLEScannerService.startForeground(

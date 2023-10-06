@@ -1,5 +1,6 @@
 package test.android.ble.module.bluetooth
 
+import android.app.Notification
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -33,7 +34,6 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import test.android.ble.entity.BTDevice
-import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.GattException
 import test.android.ble.util.android.GattUtil
@@ -54,8 +54,11 @@ internal class BLEGattService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
         class OnPair(val result: Result<BTDevice>) : Broadcast
-        object OnDisconnect : Broadcast
-        class OnConnect(val state: State.Connected) : Broadcast
+        class OnState(val state: State) : Broadcast
+        object OnDisconnected : Broadcast
+        object OnConnecting : Broadcast
+        object OnConnected : Broadcast
+        object OnDisconnecting : Broadcast
     }
 
     sealed interface State {
@@ -710,12 +713,6 @@ internal class BLEGattService : Service() {
         if (state !is State.Connecting) TODO()
         if (state.type != State.Connecting.Type.DISCOVER) TODO()
         val service = this
-        ForegroundUtil.startForeground(
-            service = service,
-            title = "connected ${state.address}",
-            action = "disconnect",
-            intent = intent(service, Action.DISCONNECT),
-        )
         _state.value = State.Connected(
             address = state.address,
             isPaired = gatt.device.bondState == BluetoothDevice.BOND_BONDED,
@@ -821,12 +818,6 @@ internal class BLEGattService : Service() {
             }
         }.fold(
             onSuccess = {
-                ForegroundUtil.startForeground(
-                    service = service,
-                    title = "searching ${state.address}...",
-                    action = "stop",
-                    intent = intent(service, Action.SEARCH_STOP),
-                )
                 _state.value = State.Search(
                     address = state.address,
                     type = State.Search.Type.COMING,
@@ -848,18 +839,9 @@ internal class BLEGattService : Service() {
             if (runCatching { isBTEnabled() }.getOrDefault(false) && isLocationEnabled()) {
                 toComing()
             } else {
-                startForegroundWaiting()
+//                startForegroundWaiting()
             }
         }
-    }
-
-    private fun startForegroundWaiting() {
-        ForegroundUtil.startForeground(
-            service = this,
-            title = "search waiting...",
-            action = "stop",
-            intent = intent(this, Action.SEARCH_STOP),
-        )
     }
 
     private fun toWaiting() {
@@ -886,7 +868,7 @@ internal class BLEGattService : Service() {
                         address = state.address,
                         type = State.Search.Type.WAITING,
                     )
-                    startForegroundWaiting()
+//                    startForegroundWaiting()
                 },
                 onFailure = {
                     _broadcast.emit(Broadcast.OnError(it))
@@ -925,10 +907,6 @@ internal class BLEGattService : Service() {
         val address = state.address
         _state.value = State.Connecting(address = address, type = State.Connecting.Type.CONNECTS)
         val service: Service = this
-        ForegroundUtil.startForeground(
-            service = service,
-            title = "connecting $address...",
-        )
         launchCatching(
             block = {
                 withContext(Dispatchers.Default) {
@@ -1012,10 +990,6 @@ internal class BLEGattService : Service() {
         val address = state.address
         val service: Service = this
         _state.value = State.Disconnecting(address = address)
-        ForegroundUtil.startForeground(
-            service = service,
-            title = "disconnecting $address...",
-        )
         scope.launch {
             runCatching {
                 val gatt = checkNotNull(gatt)
@@ -1529,6 +1503,13 @@ internal class BLEGattService : Service() {
                 onPair(pin)
             }
             Action.UNPAIR -> onUnpair()
+            Action.START_FOREGROUND -> {
+                if (!intent.hasExtra("notificationId")) TODO()
+                val notificationId = intent.getIntExtra("notificationId", -1)
+                if (!intent.hasExtra("notification")) TODO()
+                val notification = intent.getParcelableExtra<Notification>("notification") ?: TODO()
+                startForeground(notificationId, notification)
+            }
             else -> TODO("Unknown action: ${intent.action}!")
         }
     }
@@ -1589,7 +1570,7 @@ internal class BLEGattService : Service() {
                 }
                 registerReceiver(receiversConnected, filter)
                 scope.launch {
-                    _broadcast.emit(Broadcast.OnConnect(newState))
+//                    _broadcast.emit(Broadcast.OnConnect(newState)) // todo
                 }
             }
         }
@@ -1606,7 +1587,7 @@ internal class BLEGattService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 unregisterReceiver(receivers)
                 scope.launch {
-                    _broadcast.emit(Broadcast.OnDisconnect)
+//                    _broadcast.emit(Broadcast.OnDisconnect) // todo
                 }
                 scanSettings = null
             }
@@ -1626,6 +1607,33 @@ internal class BLEGattService : Service() {
                 }
             }
             .launchIn(scope)
+        scope.launch {
+            withContext(Dispatchers.Default) {
+                var oldState = state.value
+                state.collect { newState ->
+                    if (newState is State.Disconnected && oldState !is State.Disconnected) {
+                        _broadcast.emit(Broadcast.OnDisconnected)
+                    } else if (newState is State.Connecting && oldState !is State.Connecting) {
+                        _broadcast.emit(Broadcast.OnConnecting)
+                    } else if (newState is State.Disconnecting && oldState !is State.Disconnecting) {
+                        _broadcast.emit(Broadcast.OnDisconnecting)
+                    } else {
+
+                    }
+                    when (oldState) {
+                        is State.Connected -> TODO()
+                        is State.Connecting -> TODO()
+                        State.Disconnected -> TODO()
+                        is State.Disconnecting -> TODO()
+                        is State.Search -> TODO()
+                    }
+                    if (oldState != newState) {
+                        _broadcast.emit(Broadcast.OnState(newState))
+                    }
+                    oldState = newState
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -1634,7 +1642,7 @@ internal class BLEGattService : Service() {
         job.cancel()
     }
 
-    private enum class Action {
+    enum class Action {
         CONNECT,
         DISCONNECT,
         SEARCH_STOP,
@@ -1645,6 +1653,7 @@ internal class BLEGattService : Service() {
         WRITE_DESCRIPTOR,
         PAIR,
         UNPAIR,
+        START_FOREGROUND,
     }
 
     private sealed interface ProfileOperation {
@@ -1772,7 +1781,7 @@ internal class BLEGattService : Service() {
 
         private val _profileBroadcast = MutableSharedFlow<Profile.Broadcast>()
 
-        private fun intent(context: Context, action: Action): Intent {
+        fun intent(context: Context, action: Action): Intent {
             val intent = Intent(context, BLEGattService::class.java)
             intent.action = action.name
             return intent
@@ -1812,6 +1821,14 @@ internal class BLEGattService : Service() {
 
         fun unpair(context: Context) {
             val intent = intent(context, Action.UNPAIR)
+            context.startService(intent)
+        }
+
+        @JvmStatic
+        fun startForeground(context: Context, notificationId: Int, notification: Notification) {
+            val intent = intent(context, Action.START_FOREGROUND)
+            intent.putExtra("notificationId", notificationId)
+            intent.putExtra("notification", notification)
             context.startService(intent)
         }
     }
