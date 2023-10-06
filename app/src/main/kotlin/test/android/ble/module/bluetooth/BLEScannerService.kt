@@ -1,5 +1,6 @@
 package test.android.ble.module.bluetooth
 
+import android.app.Notification
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.le.ScanResult
@@ -13,6 +14,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Parcelable
 import android.util.Log
+import androidx.lifecycle.flowWithLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,11 +25,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import test.android.ble.entity.BTDevice
-import test.android.ble.util.ForegroundUtil
 
 internal class BLEScannerService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
+        class OnState(val state: State) : Broadcast
         class OnBTDevice(
             val device: BTDevice,
             val rawData: ByteArray,
@@ -106,7 +108,6 @@ internal class BLEScannerService : Service() {
     }
 
     private fun onScanStart(scanSettings: ScanSettings) {
-        val service: Service = this
         scope.launch {
             _state.value = State.NONE
             runCatching {
@@ -115,14 +116,6 @@ internal class BLEScannerService : Service() {
                 }
             }.fold(
                 onSuccess = {
-                    val intent = Intent(service, BLEScannerService::class.java)
-                    intent.action = ACTION_SCAN_STOP
-                    ForegroundUtil.startForeground(
-                        service = service,
-                        title = "scanning...",
-                        action = "stop",
-                        intent = intent,
-                    )
                     val filter = IntentFilter().also {
                         it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
                         it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
@@ -166,6 +159,13 @@ internal class BLEScannerService : Service() {
                 onScanStart(scanSettings = scanSettings)
             }
             ACTION_SCAN_STOP -> onScanStop()
+            ACTION_START_FOREGROUND -> {
+                if (!intent.hasExtra("notificationId")) TODO()
+                val notificationId = intent.getIntExtra("notificationId", -1)
+                if (!intent.hasExtra("notification")) TODO()
+                val notification = intent.getParcelableExtra<Notification>("notification") ?: TODO()
+                startForeground(notificationId, notification)
+            }
         }
     }
 
@@ -178,10 +178,26 @@ internal class BLEScannerService : Service() {
         return null
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        scope.launch {
+            withContext(Dispatchers.Default) {
+                var oldState = state.value
+                state.collect { newState ->
+                    if (oldState != newState) {
+                        _broadcast.emit(Broadcast.OnState(newState))
+                    }
+                    oldState = newState
+                }
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "[BLE|SS]"
         val ACTION_SCAN_START = "${this::class.java.name}:ACTION_SCAN_START"
         val ACTION_SCAN_STOP = "${this::class.java.name}:ACTION_SCAN_STOP"
+        val ACTION_START_FOREGROUND = "${this::class.java.name}:ACTION_START_FOREGROUND"
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
         @JvmStatic
@@ -202,6 +218,15 @@ internal class BLEScannerService : Service() {
         fun scanStop(context: Context) {
             val intent = Intent(context, BLEScannerService::class.java)
             intent.action = ACTION_SCAN_STOP
+            context.startService(intent)
+        }
+
+        @JvmStatic
+        fun startForeground(context: Context, notificationId: Int, notification: Notification) {
+            val intent = Intent(context, BLEScannerService::class.java)
+            intent.action = ACTION_START_FOREGROUND
+            intent.putExtra("notificationId", notificationId)
+            intent.putExtra("notification", notification)
             context.startService(intent)
         }
     }

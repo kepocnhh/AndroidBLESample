@@ -1,6 +1,7 @@
 package test.android.ble.module.scanner
 
 import android.bluetooth.le.ScanSettings
+import android.content.Intent
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import test.android.ble.entity.BTDevice
 import test.android.ble.module.bluetooth.BLEScannerService
+import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BLEException
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.LocException
@@ -92,6 +94,27 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                         devicesState.value = devicesState.value + device
                     }
                 }
+                is BLEScannerService.Broadcast.OnState -> {
+                    when (broadcast.state) {
+                        BLEScannerService.State.STARTED -> {
+                            val intent = Intent(context, BLEScannerService::class.java)
+                            intent.action = BLEScannerService.ACTION_SCAN_STOP
+                            val notification = ForegroundUtil.buildNotification(
+                                context = context,
+                                title = "scanning...",
+                            )
+                            ForegroundUtil.notify(context, notification)
+                            BLEScannerService.startForeground(
+                                context,
+                                notificationId = ForegroundUtil.NOTIFICATION_ID,
+                                notification,
+                            )
+                        }
+                        else -> {
+                            // todo
+                        }
+                    }
+                }
             }
         }
     }
@@ -118,6 +141,7 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                                 BLEScannerService.State.STARTED -> {
                                     BLEScannerService.scanStop(context)
                                 }
+
                                 else -> {
                                     // noop
                                 }
@@ -169,9 +193,11 @@ internal fun ScannerScreen(onSelect: (BTDevice) -> Unit) {
                             BLEScannerService.State.STARTED -> {
                                 BLEScannerService.scanStop(context)
                             }
+
                             BLEScannerService.State.STOPPED -> {
                                 BLEScannerService.scanStart(context, scanSettings = scanSettings)
                             }
+
                             else -> {
                                 // noop
                             }

@@ -15,15 +15,15 @@ import kotlin.math.absoluteValue
 internal object ForegroundUtil {
     private val CHANNEL_ID = "${this::class.java.name}:CHANNEL"
     private const val CHANNEL_NAME = "BLE Sample"
-    private val NOTIFICATION_ID = System.currentTimeMillis().toInt().absoluteValue
+    val NOTIFICATION_ID = System.currentTimeMillis().toInt().absoluteValue
 
     private fun Service.startForeground(notification: Notification) {
-        notify(notification)
+        notify(this, notification)
         startForeground(NOTIFICATION_ID, notification)
     }
 
-    private fun Context.notify(notification: Notification) {
-        val notificationManager = getSystemService(NotificationManager::class.java)
+    fun notify(context: Context, notification: Notification) {
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
         notificationManager.checkChannel()
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
@@ -53,6 +53,34 @@ internal object ForegroundUtil {
         title: String,
     ) {
         service.startForeground(service.builder(title).build())
+    }
+
+    fun getService(
+        context: Context,
+        intent: Intent,
+    ): PendingIntent {
+        return PendingIntent.getService(context, -1, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT)
+    }
+
+    fun buildNotification(
+        context: Context,
+        title: String,
+        action: String,
+        intent: PendingIntent,
+    ): Notification {
+        return context
+            .builder(title)
+            .addAction(-1, action, intent)
+            .build()
+    }
+
+    fun buildNotification(
+        context: Context,
+        title: String,
+    ): Notification {
+        return context
+            .builder(title)
+            .build()
     }
 
     private fun startForeground(
