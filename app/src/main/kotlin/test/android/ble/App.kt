@@ -113,78 +113,69 @@ internal class App : Application() {
         }
     }
 
+    private fun startForeground(
+        title: String,
+        action: BLEGattService.Action,
+        button: String,
+    ) {
+        val intent = BLEGattService.intent(context = this, action = action)
+        val notification = ForegroundUtil.buildNotification(
+            context = this,
+            title = title,
+            action = button,
+            intent = ForegroundUtil.getService(this, intent),
+        )
+        ForegroundUtil.notify(context = this, notification = notification)
+        BLEGattService.startForeground(
+            context = this,
+            notificationId = ForegroundUtil.NOTIFICATION_ID,
+            notification,
+        )
+    }
+
+    private fun startForeground(title: String) {
+        val notification = ForegroundUtil.buildNotification(
+            context = this,
+            title = title,
+        )
+        ForegroundUtil.notify(this, notification = notification)
+        BLEGattService.startForeground(
+            context = this,
+            notificationId = ForegroundUtil.NOTIFICATION_ID,
+            notification = notification,
+        )
+    }
+
     private fun onBroadcast(broadcast: Broadcast) {
         when (broadcast) {
             is Broadcast.OnConnected -> {
-                val intent = BLEGattService.intent(this, BLEGattService.Action.DISCONNECT)
-                val notification = ForegroundUtil.buildNotification(
-                    context = this,
+                startForeground(
                     title = "connected ${broadcast.address}",
-                    action = "disconnect",
-                    intent = ForegroundUtil.getService(this, intent),
-                )
-                ForegroundUtil.notify(this, notification)
-                BLEGattService.startForeground(
-                    context = this,
-                    notificationId = ForegroundUtil.NOTIFICATION_ID,
-                    notification,
+                    action = BLEGattService.Action.DISCONNECT,
+                    button = "disconnect",
                 )
             }
             is Broadcast.OnConnecting -> {
-                val notification = ForegroundUtil.buildNotification(
-                    context = this,
-                    title = "connecting ${broadcast.address}...",
-                )
-                ForegroundUtil.notify(this, notification)
-                BLEGattService.startForeground(
-                    this,
-                    notificationId = ForegroundUtil.NOTIFICATION_ID,
-                    notification,
-                )
+                startForeground(title = "connecting ${broadcast.address}...")
             }
             Broadcast.OnDisconnected -> {
                 // noop
             }
             is Broadcast.OnDisconnecting -> {
-                val notification = ForegroundUtil.buildNotification(
-                    context = this,
-                    title = "disconnecting ${broadcast.address}...",
-                )
-                ForegroundUtil.notify(this, notification)
-                BLEGattService.startForeground(
-                    this,
-                    notificationId = ForegroundUtil.NOTIFICATION_ID,
-                    notification,
-                )
+                startForeground(title = "disconnecting ${broadcast.address}...")
             }
             is Broadcast.OnSearchComing -> {
-                val intent = BLEGattService.intent(this, BLEGattService.Action.SEARCH_STOP)
-                val notification = ForegroundUtil.buildNotification(
-                    context = this,
+                startForeground(
                     title = "searching ${broadcast.address}...",
-                    action = "stop",
-                    intent = ForegroundUtil.getService(this, intent),
-                )
-                ForegroundUtil.notify(this, notification)
-                BLEGattService.startForeground(
-                    this,
-                    notificationId = ForegroundUtil.NOTIFICATION_ID,
-                    notification,
+                    action = BLEGattService.Action.SEARCH_STOP,
+                    button = "stop",
                 )
             }
             Broadcast.OnSearchWaiting -> {
-                val intent = BLEGattService.intent(this, BLEGattService.Action.SEARCH_STOP)
-                val notification = ForegroundUtil.buildNotification(
-                    context = this,
+                startForeground(
                     title = "search waiting...",
-                    action = "stop",
-                    intent = ForegroundUtil.getService(this, intent),
-                )
-                ForegroundUtil.notify(this, notification)
-                BLEGattService.startForeground(
-                    context = this,
-                    notificationId = ForegroundUtil.NOTIFICATION_ID,
-                    notification,
+                    action = BLEGattService.Action.SEARCH_STOP,
+                    button = "stop",
                 )
             }
         }
@@ -196,15 +187,15 @@ internal class App : Application() {
         _lifecycle = lifecycle
         lifecycle.addObserver(lifecycleObserver)
         BLEScannerService.state
-            .flowWithLifecycle(lifecycle)
+            .flowWithLifecycle(lifecycle, minActiveState = Lifecycle.State.CREATED)
             .onEach(::onState)
             .launchIn(lifecycle.coroutineScope)
         BLEGattService.state
-            .flowWithLifecycle(lifecycle)
+            .flowWithLifecycle(lifecycle, minActiveState = Lifecycle.State.CREATED)
             .onEach(::onState)
             .launchIn(lifecycle.coroutineScope)
         broadcast
-            .flowWithLifecycle(lifecycle)
+            .flowWithLifecycle(lifecycle, minActiveState = Lifecycle.State.CREATED)
             .onEach(::onBroadcast)
             .launchIn(lifecycle.coroutineScope)
         val injection = Injection(
