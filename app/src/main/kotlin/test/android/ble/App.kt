@@ -1,7 +1,12 @@
 package test.android.ble
 
+import android.app.Activity
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.Bundle
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -23,6 +28,9 @@ import test.android.ble.module.bluetooth.BLEScannerService
 import test.android.ble.provider.Contexts
 import test.android.ble.provider.local.FinalLocalDataProvider
 import test.android.ble.util.ForegroundUtil
+import java.util.LinkedList
+import java.util.Queue
+import kotlin.reflect.KClass
 
 internal class App : Application() {
     private var _lifecycle: Lifecycle? = null
@@ -34,6 +42,61 @@ internal class App : Application() {
             else -> {
                 // noop
             }
+        }
+    }
+    private val resumed: Queue<Activity> = LinkedList()
+    private val callbacks = object : ActivityLifecycleCallbacks {
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+            // noop
+        }
+
+        override fun onActivityStarted(activity: Activity) {
+            // noop
+        }
+
+        override fun onActivityResumed(activity: Activity) {
+            resumed.remove(activity)
+            resumed.add(activity)
+        }
+
+        override fun onActivityPaused(activity: Activity) {
+            // noop
+        }
+
+        override fun onActivityStopped(activity: Activity) {
+            // noop
+        }
+
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {
+            // noop
+        }
+
+        override fun onActivityDestroyed(activity: Activity) {
+            resumed.remove(activity)
+        }
+    }
+    private val receivers = object : BroadcastReceiver() {
+        private fun onReceive(intent: Intent) {
+            when (intent.action) {
+                ForegroundUtil.ACTION_CLICK -> {
+                    println("[App]: resumed: " + resumed.map { it::class.java.simpleName })
+                    val activity = resumed.peek()
+                    if (activity == null) {
+                        val intent = Intent(this@App, MainActivity::class.java)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                    } else {
+                        // todo
+                    }
+                }
+                else -> {
+                    // noop
+                }
+            }
+        }
+
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent != null) onReceive(intent)
         }
     }
 
@@ -131,6 +194,10 @@ internal class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        registerActivityLifecycleCallbacks(callbacks)
+        val filter = IntentFilter()
+        filter.addAction(ForegroundUtil.ACTION_CLICK)
+        registerReceiver(receivers, filter)
         val lifecycle = ProcessLifecycleOwner.get().lifecycle
         _lifecycle = lifecycle
         lifecycle.addObserver(lifecycleObserver)

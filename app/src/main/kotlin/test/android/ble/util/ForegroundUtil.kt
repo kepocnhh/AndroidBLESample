@@ -16,6 +16,7 @@ internal object ForegroundUtil {
     private val CHANNEL_ID = "${this::class.java.name}:CHANNEL"
     private const val CHANNEL_NAME = "BLE Sample"
     val NOTIFICATION_ID = System.currentTimeMillis().toInt().absoluteValue
+    val ACTION_CLICK = "${this::class.java.name}:ACTION_CLICK"
 
     private fun Service.startForeground(notification: Notification) {
         notify(this, notification)
@@ -29,9 +30,12 @@ internal object ForegroundUtil {
     }
 
     private fun Context.builder(title: String): NotificationCompat.Builder {
+        val intent = Intent(ACTION_CLICK)
+        val contentIntent = PendingIntent.getBroadcast(this, -1, intent, PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setSmallIcon(R.drawable.bt)
+            .setContentIntent(contentIntent)
     }
 
     private fun NotificationManager.checkChannel() {
