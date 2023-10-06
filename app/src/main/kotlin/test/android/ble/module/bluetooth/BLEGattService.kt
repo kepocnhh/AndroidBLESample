@@ -54,11 +54,6 @@ internal class BLEGattService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
         class OnPair(val result: Result<BTDevice>) : Broadcast
-        class OnState(val state: State) : Broadcast
-        object OnDisconnected : Broadcast
-        object OnConnecting : Broadcast
-        object OnConnected : Broadcast
-        object OnDisconnecting : Broadcast
     }
 
     sealed interface State {
@@ -1607,33 +1602,6 @@ internal class BLEGattService : Service() {
                 }
             }
             .launchIn(scope)
-        scope.launch {
-            withContext(Dispatchers.Default) {
-                var oldState = state.value
-                state.collect { newState ->
-                    if (newState is State.Disconnected && oldState !is State.Disconnected) {
-                        _broadcast.emit(Broadcast.OnDisconnected)
-                    } else if (newState is State.Connecting && oldState !is State.Connecting) {
-                        _broadcast.emit(Broadcast.OnConnecting)
-                    } else if (newState is State.Disconnecting && oldState !is State.Disconnecting) {
-                        _broadcast.emit(Broadcast.OnDisconnecting)
-                    } else {
-
-                    }
-                    when (oldState) {
-                        is State.Connected -> TODO()
-                        is State.Connecting -> TODO()
-                        State.Disconnected -> TODO()
-                        is State.Disconnecting -> TODO()
-                        is State.Search -> TODO()
-                    }
-                    if (oldState != newState) {
-                        _broadcast.emit(Broadcast.OnState(newState))
-                    }
-                    oldState = newState
-                }
-            }
-        }
     }
 
     override fun onDestroy() {

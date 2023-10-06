@@ -14,7 +14,6 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Parcelable
 import android.util.Log
-import androidx.lifecycle.flowWithLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,7 +28,6 @@ import test.android.ble.entity.BTDevice
 internal class BLEScannerService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
-        class OnState(val state: State) : Broadcast
         class OnBTDevice(
             val device: BTDevice,
             val rawData: ByteArray,
@@ -176,21 +174,6 @@ internal class BLEScannerService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? {
         return null
-    }
-
-    override fun onCreate() {
-        super.onCreate()
-        scope.launch {
-            withContext(Dispatchers.Default) {
-                var oldState = state.value
-                state.collect { newState ->
-                    if (oldState != newState) {
-                        _broadcast.emit(Broadcast.OnState(newState))
-                    }
-                    oldState = newState
-                }
-            }
-        }
     }
 
     companion object {

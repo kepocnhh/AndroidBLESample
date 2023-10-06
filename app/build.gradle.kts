@@ -99,4 +99,5 @@ dependencies {
 //    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.5.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
     implementation("com.github.kepocnhh:ComposeClicks:0.2.2-SNAPSHOT")
+    implementation("androidx.lifecycle:lifecycle-process:2.6.2")
 }

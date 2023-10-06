@@ -42,7 +42,6 @@ import sp.ax.jc.clicks.clicks
 import sp.ax.jc.clicks.onClick
 import test.android.ble.App
 import test.android.ble.module.bluetooth.BLEGattService
-import test.android.ble.util.ForegroundUtil
 import test.android.ble.util.android.BLEException
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.GattException
@@ -743,6 +742,19 @@ internal fun DeviceScreen(
     }
     val lastOperationState = remember { mutableStateOf<Operation?>(null) }
     LaunchedEffect(Unit) {
+        App.broadcast.collect { broadcast ->
+            when (broadcast) {
+                App.Broadcast.OnDisconnected -> {
+                    lastOperationState.value = null
+                    context.showToast("Disconnected.")
+                }
+                else -> {
+                    // todo
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
         BLEGattService.broadcast.collect { broadcast ->
             when (broadcast) {
                 is BLEGattService.Broadcast.OnError -> {
@@ -806,93 +818,6 @@ internal fun DeviceScreen(
                             }
                         },
                     )
-                }
-                is BLEGattService.Broadcast.OnState -> {
-                    when (broadcast.state) {
-                        is BLEGattService.State.Connected -> {
-                            val intent = BLEGattService.intent(context, BLEGattService.Action.DISCONNECT)
-                            val notification = ForegroundUtil.buildNotification(
-                                context = context,
-                                title = "connected ${broadcast.state.address}",
-                                action = "disconnect",
-                                intent = ForegroundUtil.getService(context, intent),
-                            )
-                            ForegroundUtil.notify(context, notification)
-                            BLEGattService.startForeground(
-                                context,
-                                notificationId = ForegroundUtil.NOTIFICATION_ID,
-                                notification,
-                            )
-                        }
-                        is BLEGattService.State.Search -> {
-                            when (broadcast.state.type) {
-                                BLEGattService.State.Search.Type.COMING -> {
-                                    val intent = BLEGattService.intent(context, BLEGattService.Action.SEARCH_STOP)
-                                    val notification = ForegroundUtil.buildNotification(
-                                        context = context,
-                                        title = "searching ${broadcast.state.address}...",
-                                        action = "stop",
-                                        intent = ForegroundUtil.getService(context, intent),
-                                    )
-                                    ForegroundUtil.notify(context, notification)
-                                    BLEGattService.startForeground(
-                                        context,
-                                        notificationId = ForegroundUtil.NOTIFICATION_ID,
-                                        notification,
-                                    )
-                                }
-                                BLEGattService.State.Search.Type.WAITING -> {
-                                    val intent = BLEGattService.intent(context, BLEGattService.Action.SEARCH_STOP)
-                                    val notification = ForegroundUtil.buildNotification(
-                                        context = context,
-                                        title = "search waiting...",
-                                        action = "stop",
-                                        intent = ForegroundUtil.getService(context, intent),
-                                    )
-                                    ForegroundUtil.notify(context, notification)
-                                    BLEGattService.startForeground(
-                                        context,
-                                        notificationId = ForegroundUtil.NOTIFICATION_ID,
-                                        notification,
-                                    )
-                                }
-                                else -> {
-                                    // todo
-                                }
-                            }
-                        }
-                        is BLEGattService.State.Connecting -> {
-                            val notification = ForegroundUtil.buildNotification(
-                                context = context,
-                                title = "connecting $address...",
-                            )
-                            ForegroundUtil.notify(context, notification)
-                            BLEGattService.startForeground(
-                                context,
-                                notificationId = ForegroundUtil.NOTIFICATION_ID,
-                                notification,
-                            )
-                        }
-                        is BLEGattService.State.Disconnecting -> {
-                            val notification = ForegroundUtil.buildNotification(
-                                context = context,
-                                title = "disconnecting $address...",
-                            )
-                            ForegroundUtil.notify(context, notification)
-                            BLEGattService.startForeground(
-                                context,
-                                notificationId = ForegroundUtil.NOTIFICATION_ID,
-                                notification,
-                            )
-                        }
-                        BLEGattService.State.Disconnected -> {
-                            lastOperationState.value = null
-                            context.showToast("Disconnected.")
-                        }
-                        else -> {
-                            // todo
-                        }
-                    }
                 }
             }
         }
