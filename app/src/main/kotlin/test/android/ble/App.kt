@@ -25,15 +25,6 @@ import test.android.ble.provider.local.FinalLocalDataProvider
 import test.android.ble.util.ForegroundUtil
 
 internal class App : Application() {
-    sealed interface Broadcast {
-        object OnDisconnected : Broadcast
-        class OnConnecting(val address: String) : Broadcast
-        class OnConnected(val address: String) : Broadcast
-        class OnDisconnecting(val address: String) : Broadcast
-        object OnSearchWaiting : Broadcast
-        class OnSearchComing(val address: String) : Broadcast
-    }
-
     private var _lifecycle: Lifecycle? = null
     private val lifecycleObserver = LifecycleEventObserver { _, event: Lifecycle.Event ->
         when (event) {
@@ -45,15 +36,10 @@ internal class App : Application() {
             }
         }
     }
-    private var gattState: BLEGattService.State = BLEGattService.State.Disconnected
-    private var scannerState: BLEScannerService.State = BLEScannerService.State.NONE
 
-    private fun onState(newState: BLEScannerService.State) {
-        val oldState = scannerState
-        scannerState = newState
-        when (newState) {
+    private fun onState(state: BLEScannerService.State) {
+        when (state) {
             BLEScannerService.State.STARTED -> {
-                if (oldState == BLEScannerService.State.STARTED) return
                 val intent = Intent(this, BLEScannerService::class.java)
                 intent.action = BLEScannerService.ACTION_SCAN_STOP
                 val notification = ForegroundUtil.buildNotification(
@@ -71,44 +57,6 @@ internal class App : Application() {
             }
             else -> {
                 // noop
-            }
-        }
-    }
-
-    private suspend fun onState(newState: BLEGattService.State) {
-        val oldState = gattState
-        gattState = newState
-        when (newState) {
-            is BLEGattService.State.Connected -> {
-                if (oldState is BLEGattService.State.Connected) return
-                _broadcast.emit(Broadcast.OnConnected(address = newState.address))
-            }
-            is BLEGattService.State.Connecting -> {
-                if (oldState is BLEGattService.State.Connecting) return
-                _broadcast.emit(Broadcast.OnConnecting(address = newState.address))
-            }
-            BLEGattService.State.Disconnected -> {
-                if (oldState is BLEGattService.State.Disconnected) return
-                _broadcast.emit(Broadcast.OnDisconnected)
-            }
-            is BLEGattService.State.Disconnecting -> {
-                if (oldState is BLEGattService.State.Disconnecting) return
-                _broadcast.emit(Broadcast.OnDisconnecting(address = newState.address))
-            }
-            is BLEGattService.State.Search -> {
-                when (newState.type) {
-                    BLEGattService.State.Search.Type.WAITING -> {
-                        if (oldState is BLEGattService.State.Search && oldState.type == BLEGattService.State.Search.Type.WAITING) return
-                        _broadcast.emit(Broadcast.OnSearchWaiting)
-                    }
-                    BLEGattService.State.Search.Type.COMING -> {
-                        if (oldState is BLEGattService.State.Search && oldState.type == BLEGattService.State.Search.Type.COMING) return
-                        _broadcast.emit(Broadcast.OnSearchComing(address = newState.address))
-                    }
-                    else -> {
-                        // noop
-                    }
-                }
             }
         }
     }
@@ -146,32 +94,32 @@ internal class App : Application() {
         )
     }
 
-    private fun onBroadcast(broadcast: Broadcast) {
-        when (broadcast) {
-            is Broadcast.OnConnected -> {
+    private fun onEvent(event: BLEGattService.Event) {
+        when (event) {
+            is BLEGattService.Event.OnConnected -> {
                 startForeground(
-                    title = "connected ${broadcast.address}",
+                    title = "connected ${event.address}",
                     action = BLEGattService.Action.DISCONNECT,
                     button = "disconnect",
                 )
             }
-            is Broadcast.OnConnecting -> {
-                startForeground(title = "connecting ${broadcast.address}...")
+            is BLEGattService.Event.OnConnecting -> {
+                startForeground(title = "connecting ${event.address}...")
             }
-            Broadcast.OnDisconnected -> {
+            BLEGattService.Event.OnDisconnected -> {
                 // noop
             }
-            is Broadcast.OnDisconnecting -> {
-                startForeground(title = "disconnecting ${broadcast.address}...")
+            is BLEGattService.Event.OnDisconnecting -> {
+                startForeground(title = "disconnecting ${event.address}...")
             }
-            is Broadcast.OnSearchComing -> {
+            is BLEGattService.Event.OnSearchComing -> {
                 startForeground(
-                    title = "searching ${broadcast.address}...",
+                    title = "searching ${event.address}...",
                     action = BLEGattService.Action.SEARCH_STOP,
                     button = "stop",
                 )
             }
-            Broadcast.OnSearchWaiting -> {
+            BLEGattService.Event.OnSearchWaiting -> {
                 startForeground(
                     title = "search waiting...",
                     action = BLEGattService.Action.SEARCH_STOP,
@@ -190,13 +138,9 @@ internal class App : Application() {
             .flowWithLifecycle(lifecycle, minActiveState = Lifecycle.State.CREATED)
             .onEach(::onState)
             .launchIn(lifecycle.coroutineScope)
-        BLEGattService.state
+        BLEGattService.event
             .flowWithLifecycle(lifecycle, minActiveState = Lifecycle.State.CREATED)
-            .onEach(::onState)
-            .launchIn(lifecycle.coroutineScope)
-        broadcast
-            .flowWithLifecycle(lifecycle, minActiveState = Lifecycle.State.CREATED)
-            .onEach(::onBroadcast)
+            .onEach(::onEvent)
             .launchIn(lifecycle.coroutineScope)
         val injection = Injection(
             local = FinalLocalDataProvider(this),
@@ -213,9 +157,6 @@ internal class App : Application() {
     }
 
     companion object {
-        private val _broadcast = MutableSharedFlow<Broadcast>()
-        val broadcast = _broadcast.asSharedFlow()
-
         private var _viewModelFactory: ViewModelProvider.Factory? = null
 
         @Composable

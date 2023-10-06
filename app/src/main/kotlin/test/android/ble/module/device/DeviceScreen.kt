@@ -742,9 +742,9 @@ internal fun DeviceScreen(
     }
     val lastOperationState = remember { mutableStateOf<Operation?>(null) }
     LaunchedEffect(Unit) {
-        App.broadcast.collect { broadcast ->
-            when (broadcast) {
-                App.Broadcast.OnDisconnected -> {
+        BLEGattService.event.collect { event ->
+            when (event) {
+                BLEGattService.Event.OnDisconnected -> {
                     lastOperationState.value = null
                     context.showToast("Disconnected.")
                 }

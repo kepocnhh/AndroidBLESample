@@ -106,8 +106,18 @@ internal class BLEGattService : Service() {
         object Disconnected : State
     }
 
+    sealed interface Event {
+        object OnDisconnected : Event
+        class OnConnecting(val address: String) : Event
+        class OnConnected(val address: String) : Event
+        class OnDisconnecting(val address: String) : Event
+        object OnSearchWaiting : Event
+        class OnSearchComing(val address: String) : Event
+    }
+
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Main + job)
+    private var oldState: State = State.Disconnected
     private var gatt: BluetoothGatt? = null
     private var pin: String? = null
     private var scanSettings: ScanSettings? = null
@@ -1519,72 +1529,85 @@ internal class BLEGattService : Service() {
         return null
     }
 
-    private fun onNewState(oldState: State, newState: State) {
-        if (oldState is State.Connected) {
-            if (newState is State.Connected) {
-                when (oldState.type) {
-                    State.Connected.Type.READY -> {
-                        when (newState.type) {
-                            State.Connected.Type.PAIRING -> {
-                                val filter = IntentFilter().also {
-                                    if (pin != null) {
-                                        it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
-                                    }
-                                    it.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
-                                }
-                                registerReceiver(receiversPairing, filter)
-                            }
-                            else -> {
-                                // noop
-                            }
-                        }
-                    }
-                    State.Connected.Type.PAIRING -> {
-                        when (newState.type) {
-                            State.Connected.Type.PAIRING -> {
-                                // noop
-                            }
-                            else -> {
-                                unregisterReceiver(receiversPairing)
-                            }
-                        }
-                    }
-                    else -> {
-                        // noop
-                    }
-                }
-            } else {
-                unregisterReceiver(receiversConnected)
-            }
-        } else {
-            if (newState is State.Connected) {
-                val filter = IntentFilter().also {
-                    it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
-                    it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
-                    it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-                }
-                registerReceiver(receiversConnected, filter)
-                scope.launch {
-//                    _broadcast.emit(Broadcast.OnConnect(newState)) // todo
+    private suspend fun onState(newState: State) {
+        val oldState = oldState
+        this.oldState = newState
+        when (oldState) {
+            is State.Connected -> {
+                if (newState !is State.Connected) {
+                    unregisterReceiver(receiversConnected)
                 }
             }
-        }
-        if (oldState is State.Disconnected) {
-            if (newState !is State.Disconnected) {
+            State.Disconnected -> {
+                if (newState is State.Disconnected) return
                 val filter = IntentFilter().also {
                     it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
                     it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
                 }
                 registerReceiver(receivers, filter)
             }
-        } else {
-            if (newState is State.Disconnected) {
+            else -> {
+                // noop
+            }
+        }
+        when (newState) {
+            is State.Connected -> {
+                if (oldState is State.Connected) {
+                    when (newState.type) {
+                        State.Connected.Type.PAIRING -> {
+                            if (oldState.type != State.Connected.Type.READY) return
+                            val filter = IntentFilter().also {
+                                if (pin != null) {
+                                    it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
+                                }
+                                it.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
+                            }
+                            registerReceiver(receiversPairing, filter)
+                        }
+                        else -> {
+                            if (oldState.type != State.Connected.Type.PAIRING) return
+                            unregisterReceiver(receiversPairing)
+                        }
+                    }
+                } else {
+                    _event.emit(Event.OnConnected(address = newState.address))
+                    val filter = IntentFilter().also {
+                        it.priority = IntentFilter.SYSTEM_HIGH_PRIORITY
+                        it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                        it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+                    }
+                    registerReceiver(receiversConnected, filter)
+                }
+            }
+            is State.Connecting -> {
+                if (oldState is State.Connecting) return
+                _event.emit(Event.OnConnecting(address = newState.address))
+            }
+            State.Disconnected -> {
+                if (oldState is State.Disconnected) return
+                _event.emit(Event.OnDisconnected)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 unregisterReceiver(receivers)
-                scope.launch {
-//                    _broadcast.emit(Broadcast.OnDisconnect) // todo
-                }
                 scanSettings = null
+            }
+            is State.Disconnecting -> {
+                if (oldState is State.Disconnecting) return
+                _event.emit(Event.OnDisconnecting(address = newState.address))
+            }
+            is State.Search -> {
+                when (newState.type) {
+                    State.Search.Type.WAITING -> {
+                        if (oldState is State.Search && oldState.type == State.Search.Type.WAITING) return
+                        _event.emit(Event.OnSearchWaiting)
+                    }
+                    State.Search.Type.COMING -> {
+                        if (oldState is State.Search && oldState.type == State.Search.Type.COMING) return
+                        _event.emit(Event.OnSearchComing(address = newState.address))
+                    }
+                    else -> {
+                        // noop
+                    }
+                }
             }
         }
     }
@@ -1593,14 +1616,15 @@ internal class BLEGattService : Service() {
         super.onCreate()
         Log.d(TAG, "on create[${hashCode()}]...") // todo
         state
-            .onEach { newState ->
-                oldState.also {
-                    if (it != newState) {
-                        onNewState(it, newState)
-                        oldState = newState
-                    }
-                }
-            }
+            .onEach(::onState)
+//            .onEach { newState ->
+//                oldState.also {
+//                    if (it != newState) {
+//                        onNewState(it, newState)
+//                        oldState = newState
+//                    }
+//                }
+//            }
             .launchIn(scope)
     }
 
@@ -1742,7 +1766,10 @@ internal class BLEGattService : Service() {
         @JvmStatic
         val broadcast = _broadcast.asSharedFlow()
 
-        private var oldState: State = State.Disconnected
+        private val _event = MutableSharedFlow<Event>()
+        @JvmStatic
+        val event = _event.asSharedFlow()
+
         private val _state = MutableStateFlow<State>(State.Disconnected)
         @JvmStatic
         val state = _state.asStateFlow()
