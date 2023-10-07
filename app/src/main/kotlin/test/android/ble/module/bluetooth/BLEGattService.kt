@@ -212,6 +212,28 @@ internal class BLEGattService : Service() {
             }
         }
 
+        @Deprecated(message = "todo")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?,
+            status: Int
+        ) {
+            when (status) {
+                BluetoothGatt.GATT_SUCCESS -> {
+                    if (characteristic == null) TODO("On characteristic read success. But no characteristic!")
+                    Log.d(TAG, "On characteristic [DEPRECATED] ${characteristic.service.uuid}/${characteristic.uuid} read success.")
+                    onCharacteristicRead(characteristic)
+                }
+                else -> {
+                    if (characteristic == null) {
+                        Log.w(TAG, "On characteristic [DEPRECATED] read status: $status!")
+                    } else {
+                        Log.w(TAG, "On characteristic [DEPRECATED] ${characteristic.service.uuid}/${characteristic.uuid} read status: $status!")
+                    }
+                }
+            }
+        }
+
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -237,7 +259,7 @@ internal class BLEGattService : Service() {
         ) {
             if (gatt == null) return
             if (characteristic == null) return
-            Log.i(TAG, "On characteristic DEPRECATED ${characteristic.service.uuid}/${characteristic.uuid} changed.")
+            Log.i(TAG, "On characteristic [DEPRECATED] ${characteristic.service.uuid}/${characteristic.uuid} changed.")
             onCharacteristicChanged(characteristic, value = characteristic.value.copyOf())
         }
 
@@ -1056,9 +1078,7 @@ internal class BLEGattService : Service() {
                     Log.d(TAG, "All operations performed.")
                     return
                 }
-                else -> {
-                    TODO("State: $state. Type: ${state.type}. But no operation!")
-                }
+                else -> TODO("State: $state. Type: ${state.type}. But no operation!")
             }
         }
         when (state.type) {
@@ -1093,26 +1113,12 @@ internal class BLEGattService : Service() {
                     characteristic = operation.characteristic,
                 )
             }
-        }
-    }
-    private fun onReadCharacteristic(
-        service: UUID,
-        characteristic: UUID,
-    ) {
-        Log.d(TAG, "On read $service/$characteristic...")
-        val state = state.value
-        if (state !is State.Connected) TODO("on read $service/$characteristic state: $state")
-        val operation = ProfileOperation.ReadCharacteristic(
-            service = service,
-            characteristic = characteristic,
-        )
-        profileOperations.add(operation)
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                performOperations()
-            }
-            else -> {
-                // noop
+            is ProfileOperation.SetCharacteristicNotification -> {
+                setCharacteristicNotification(
+                    service = operation.service,
+                    characteristic = operation.characteristic,
+                    value = operation.value,
+                )
             }
         }
     }
@@ -1227,69 +1233,77 @@ internal class BLEGattService : Service() {
                 // todo
             },
             onFailure = {
-                when (it) {
-                    is GattException -> {
-                        when (it.type) {
-                            GattException.Type.READING_WAS_NOT_INITIATED -> {
-                                Log.w(TAG, "Reading $service/$characteristic was not initiated!")
-                            }
-                            else -> {
-                                // noop
-                            }
-                        }
-                    }
-                    else -> {
-                        TODO("read $service/$characteristic error: $it")
-                    }
+                if (it is GattException && it.type == GattException.Type.READING_WAS_NOT_INITIATED) {
+                    Log.w(TAG, "Reading $service/$characteristic was not initiated!")
+                    _broadcast.emit(Broadcast.OnError(it))
+                    performOperations()
+                } else {
+                    TODO("read $service/$characteristic error: $it")
                 }
             },
         )
     }
 
-    private fun onWriteCharacteristic(
+    private fun onNotificationStatusSet(
         service: UUID,
         characteristic: UUID,
-        bytes: ByteArray,
+        value: Boolean,
     ) {
-        Log.d(TAG, "On write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
-        if (state !is State.Connected) TODO("on write $service/$characteristic state: $state")
-        val operation = ProfileOperation.WriteCharacteristic(service = service, characteristic = characteristic, bytes)
-        profileOperations.add(operation)
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                performOperations()
-            }
-            else -> {
-                // noop
-            }
+        if (state !is State.Connected) {
+            Log.d(TAG, "The setting results are no longer relevant. Disconnected.")
+            return
+        }
+        if (state.type != State.Connected.Type.OPERATING) TODO("on $service/$characteristic notification set state type: ${state.type}")
+        performOperations()
+        scope.launch {
+            _profileBroadcast.emit(
+                Profile.Broadcast.OnSetCharacteristicNotification(
+                    service = service,
+                    characteristic = characteristic,
+                    value = value,
+                ),
+            )
         }
     }
 
-    private fun onWriteDescriptor(
+    private fun setCharacteristicNotification(
         service: UUID,
         characteristic: UUID,
-        descriptor: UUID,
-        bytes: ByteArray,
+        value: Boolean,
     ) {
-        Log.d(TAG, "on write descriptor ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
         val state = state.value
-        if (state !is State.Connected) TODO("on write $descriptor of $service/$characteristic state: $state")
-        val operation = ProfileOperation.WriteDescriptor(
-            service = service,
-            characteristic = characteristic,
-            descriptor = descriptor,
-            bytes = bytes,
+        if (state !is State.Connected) TODO("set $service/$characteristic notification state: $state")
+        if (state.type != State.Connected.Type.OPERATING) TODO("set $service/$characteristic notification state type: ${state.type}")
+        Log.d(TAG, "set $service/$characteristic notification...")
+        launchCatching(
+            block = {
+                withContext(Dispatchers.Default) {
+                    GattUtil.setCharacteristicNotification(
+                        gatt = gatt ?: TODO("Set $service/$characteristic notification. No GATT!"),
+                        service = service,
+                        characteristic = characteristic,
+                        value = value,
+                    )
+                }
+            },
+            onSuccess = {
+                onNotificationStatusSet(
+                    service = service,
+                    characteristic = characteristic,
+                    value = value,
+                )
+            },
+            onFailure = {
+                if (it is GattException && it.type == GattException.Type.NOTIFICATION_STATUS_WAS_NOT_SUCCESSFULLY_SET) {
+                    Log.w(TAG, "The $service/$characteristic notification status was not successfully set!")
+                    _broadcast.emit(Broadcast.OnError(it))
+                    performOperations()
+                } else {
+                    TODO("set $service/$characteristic notification error: $it")
+                }
+            },
         )
-        profileOperations.add(operation)
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                performOperations()
-            }
-            else -> {
-                // noop
-            }
-        }
     }
 
     private fun onPair(pin: String?) {
@@ -1378,41 +1392,76 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onWriteDescriptor(
+        service: UUID,
+        characteristic: UUID,
+        descriptor: UUID,
+        bytes: ByteArray,
+    ) {
+        Log.d(TAG, "on write $descriptor of $service/$characteristic...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on write $descriptor of $service/$characteristic state: $state")
+        val operation = ProfileOperation.WriteDescriptor(
+            service = service,
+            characteristic = characteristic,
+            descriptor = descriptor,
+            bytes = bytes,
+        )
+        profileOperations.add(operation)
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
+    }
+
+    private fun onWriteCharacteristic(
+        service: UUID,
+        characteristic: UUID,
+        bytes: ByteArray,
+    ) {
+        Log.d(TAG, "on write $service/$characteristic...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on write $service/$characteristic state: $state")
+        val operation = ProfileOperation.WriteCharacteristic(
+            service = service,
+            characteristic = characteristic,
+            bytes = bytes,
+        )
+        profileOperations.add(operation)
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
+    }
+
+    private fun onReadCharacteristic(
+        service: UUID,
+        characteristic: UUID,
+    ) {
+        Log.d(TAG, "on read $service/$characteristic...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on read $service/$characteristic state: $state")
+        val operation = ProfileOperation.ReadCharacteristic(
+            service = service,
+            characteristic = characteristic,
+        )
+        profileOperations.add(operation)
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
+    }
+
     private fun onSetCharacteristicNotification(
         service: UUID,
         characteristic: UUID,
         value: Boolean,
     ) {
-        Log.d(TAG, "on set characteristic notification...")
+        Log.d(TAG, "on set $service/$characteristic notification...")
         val state = state.value
-        if (state !is State.Connected) TODO("On set characteristic notification state: $state")
-        if (state.type != State.Connected.Type.READY) TODO("On set characteristic notification state type: ${state.type}")
-        launchCatching(
-            block = {
-                withContext(Dispatchers.Default) {
-                    GattUtil.setCharacteristicNotification(
-                        gatt = gatt ?: TODO("No GATT!"),
-                        service = service,
-                        characteristic = characteristic,
-                        value = value,
-                    )
-                }
-            },
-            onSuccess = {
-                scope.launch {
-                    _profileBroadcast.emit(
-                        Profile.Broadcast.OnSetCharacteristicNotification(
-                            service = service,
-                            characteristic = characteristic,
-                            value = value,
-                        ),
-                    )
-                }
-            },
-            onFailure = {
-                TODO("On set characteristic notification error: $it!")
-            },
+        if (state !is State.Connected) TODO("on set $service/$characteristic notification state: $state")
+        val operation = ProfileOperation.SetCharacteristicNotification(
+            service = service,
+            characteristic = characteristic,
+            value = value,
         )
+        profileOperations.add(operation)
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
     }
 
     private fun onStartCommand(intent: Intent) {
@@ -1432,8 +1481,12 @@ internal class BLEGattService : Service() {
             Action.DISCONNECT -> onDisconnect()
             Action.REQUEST_SERVICES -> onRequestServices()
             Action.SET_CHARACTERISTIC_NOTIFICATION -> {
-                val extras = intent.extras ?: TODO("No extras!")
-                if (!extras.containsKey("value")) TODO("No value!")
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be set. Already disconnected.")
+                    return
+                }
+                if (!intent.hasExtra("value")) TODO("No value!")
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
                     ?: TODO("No service!")
@@ -1447,6 +1500,11 @@ internal class BLEGattService : Service() {
                 )
             }
             Action.READ_CHARACTERISTIC -> {
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be read. Already disconnected.")
+                    return
+                }
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
                     ?: TODO("No service!")
@@ -1663,6 +1721,11 @@ internal class BLEGattService : Service() {
         class ReadCharacteristic(
             val service: UUID,
             val characteristic: UUID,
+        ) : ProfileOperation
+        class SetCharacteristicNotification(
+            val service: UUID,
+            val characteristic: UUID,
+            val value: Boolean,
         ) : ProfileOperation
     }
 

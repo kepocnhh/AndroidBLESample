@@ -5,10 +5,15 @@ import java.util.UUID
 
 internal class GattException(val type: Type): Exception() {
     enum class Type {
+        NOTIFICATION_STATUS_WAS_NOT_SUCCESSFULLY_SET,
         CHARACTERISTIC_WRITING_WAS_NOT_INITIATED,
         DESCRIPTOR_WRITING_WAS_NOT_INITIATED,
         READING_WAS_NOT_INITIATED,
         DISCONNECTING_BY_TIMEOUT,
+    }
+
+    override fun toString(): String {
+        return "GattException(${type.name})"
     }
 }
 
@@ -24,7 +29,7 @@ internal object GattUtil {
         val characteristic = service.getCharacteristic(characteristic)
             ?: TODO("No characteristic $characteristic!")
         if (!gatt.setCharacteristicNotification(characteristic, value)) {
-            TODO("Set characteristic notification $value error!")
+            throw GattException(GattException.Type.NOTIFICATION_STATUS_WAS_NOT_SUCCESSFULLY_SET)
         }
     }
 
