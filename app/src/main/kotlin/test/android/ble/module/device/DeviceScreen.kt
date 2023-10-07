@@ -136,7 +136,6 @@ private fun <T : Any> ListSelect(
     }
 }
 
-
 @Composable
 private fun <T : Any> DialogListSelect(
     visible: Boolean,
@@ -302,12 +301,6 @@ private fun Characteristics(
         },
         onLongClick = {
             characteristicOptionsState.value = selectedServiceState.value!! to it
-            BLEGattService.Profile.setCharacteristicNotification(
-                context = context,
-                service = selectedServiceState.value!!,
-                characteristic = it,
-                value = true,
-            )
         },
     )
     DialogListSelect(
@@ -790,6 +783,9 @@ internal fun DeviceScreen(
                                 }
                                 GattException.Type.DISCONNECTING_BY_TIMEOUT -> {
                                     context.showToast("Disconnecting by timeout!")
+                                }
+                                GattException.Type.NOTIFICATION_STATUS_WAS_NOT_SUCCESSFULLY_SET -> {
+                                    context.showToast("Notification status was not successfully set!")
                                 }
                             }
                         }

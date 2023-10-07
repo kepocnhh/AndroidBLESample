@@ -212,6 +212,28 @@ internal class BLEGattService : Service() {
             }
         }
 
+        @Deprecated(message = "todo")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?,
+            status: Int
+        ) {
+            when (status) {
+                BluetoothGatt.GATT_SUCCESS -> {
+                    if (characteristic == null) TODO("On characteristic read success. But no characteristic!")
+                    Log.d(TAG, "On characteristic [DEPRECATED] ${characteristic.service.uuid}/${characteristic.uuid} read success.")
+                    onCharacteristicRead(characteristic)
+                }
+                else -> {
+                    if (characteristic == null) {
+                        Log.w(TAG, "On characteristic [DEPRECATED] read status: $status!")
+                    } else {
+                        Log.w(TAG, "On characteristic [DEPRECATED] ${characteristic.service.uuid}/${characteristic.uuid} read status: $status!")
+                    }
+                }
+            }
+        }
+
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -237,7 +259,7 @@ internal class BLEGattService : Service() {
         ) {
             if (gatt == null) return
             if (characteristic == null) return
-            Log.i(TAG, "On characteristic DEPRECATED ${characteristic.service.uuid}/${characteristic.uuid} changed.")
+            Log.i(TAG, "On characteristic [DEPRECATED] ${characteristic.service.uuid}/${characteristic.uuid} changed.")
             onCharacteristicChanged(characteristic, value = characteristic.value.copyOf())
         }
 
@@ -1093,6 +1115,13 @@ internal class BLEGattService : Service() {
                     characteristic = operation.characteristic,
                 )
             }
+            is ProfileOperation.SetCharacteristicNotification -> {
+                setCharacteristicNotification(
+                    service = operation.service,
+                    characteristic = operation.characteristic,
+                    value = operation.value,
+                )
+            }
         }
     }
     private fun onReadCharacteristic(
@@ -1227,20 +1256,74 @@ internal class BLEGattService : Service() {
                 // todo
             },
             onFailure = {
-                when (it) {
-                    is GattException -> {
-                        when (it.type) {
-                            GattException.Type.READING_WAS_NOT_INITIATED -> {
-                                Log.w(TAG, "Reading $service/$characteristic was not initiated!")
-                            }
-                            else -> {
-                                // noop
-                            }
-                        }
-                    }
-                    else -> {
-                        TODO("read $service/$characteristic error: $it")
-                    }
+                if (it is GattException && it.type == GattException.Type.READING_WAS_NOT_INITIATED) {
+                    Log.w(TAG, "Reading $service/$characteristic was not initiated!")
+                    _broadcast.emit(Broadcast.OnError(it))
+                    performOperations()
+                } else {
+                    TODO("read $service/$characteristic error: $it")
+                }
+            },
+        )
+    }
+
+    private fun onNotificationStatusSet(
+        service: UUID,
+        characteristic: UUID,
+        value: Boolean,
+    ) {
+        val state = state.value
+        if (state !is State.Connected) {
+            Log.d(TAG, "The setting results are no longer relevant. Disconnected.")
+            return
+        }
+        if (state.type != State.Connected.Type.OPERATING) TODO("on $service/$characteristic notification set state type: ${state.type}")
+        performOperations()
+        scope.launch {
+            _profileBroadcast.emit(
+                Profile.Broadcast.OnSetCharacteristicNotification(
+                    service = service,
+                    characteristic = characteristic,
+                    value = value,
+                ),
+            )
+        }
+    }
+
+    private fun setCharacteristicNotification(
+        service: UUID,
+        characteristic: UUID,
+        value: Boolean,
+    ) {
+        val state = state.value
+        if (state !is State.Connected) TODO("set $service/$characteristic notification state: $state")
+        if (state.type != State.Connected.Type.OPERATING) TODO("set $service/$characteristic notification state type: ${state.type}")
+        Log.d(TAG, "set $service/$characteristic notification...")
+        launchCatching(
+            block = {
+                withContext(Dispatchers.Default) {
+                    GattUtil.setCharacteristicNotification(
+                        gatt = gatt ?: TODO("Set $service/$characteristic notification. No GATT!"),
+                        service = service,
+                        characteristic = characteristic,
+                        value = value,
+                    )
+                }
+            },
+            onSuccess = {
+                onNotificationStatusSet(
+                    service = service,
+                    characteristic = characteristic,
+                    value = value,
+                )
+            },
+            onFailure = {
+                if (it is GattException && it.type == GattException.Type.NOTIFICATION_STATUS_WAS_NOT_SUCCESSFULLY_SET) {
+                    Log.w(TAG, "The $service/$characteristic notification status was not successfully set!")
+                    _broadcast.emit(Broadcast.OnError(it))
+                    performOperations()
+                } else {
+                    TODO("set $service/$characteristic notification error: $it")
                 }
             },
         )
@@ -1383,36 +1466,19 @@ internal class BLEGattService : Service() {
         characteristic: UUID,
         value: Boolean,
     ) {
-        Log.d(TAG, "on set characteristic notification...")
+        Log.d(TAG, "on set $service/$characteristic notification...")
         val state = state.value
-        if (state !is State.Connected) TODO("On set characteristic notification state: $state")
-        if (state.type != State.Connected.Type.READY) TODO("On set characteristic notification state type: ${state.type}")
-        launchCatching(
-            block = {
-                withContext(Dispatchers.Default) {
-                    GattUtil.setCharacteristicNotification(
-                        gatt = gatt ?: TODO("No GATT!"),
-                        service = service,
-                        characteristic = characteristic,
-                        value = value,
-                    )
-                }
-            },
-            onSuccess = {
-                scope.launch {
-                    _profileBroadcast.emit(
-                        Profile.Broadcast.OnSetCharacteristicNotification(
-                            service = service,
-                            characteristic = characteristic,
-                            value = value,
-                        ),
-                    )
-                }
-            },
-            onFailure = {
-                TODO("On set characteristic notification error: $it!")
-            },
-        )
+        if (state !is State.Connected) TODO("On set $service/$characteristic notification state: $state")
+        val operation = ProfileOperation.SetCharacteristicNotification(service = service, characteristic = characteristic, value = value)
+        profileOperations.add(operation)
+        when (state.type) {
+            State.Connected.Type.READY -> {
+                performOperations()
+            }
+            else -> {
+                // noop
+            }
+        }
     }
 
     private fun onStartCommand(intent: Intent) {
@@ -1663,6 +1729,11 @@ internal class BLEGattService : Service() {
         class ReadCharacteristic(
             val service: UUID,
             val characteristic: UUID,
+        ) : ProfileOperation
+        class SetCharacteristicNotification(
+            val service: UUID,
+            val characteristic: UUID,
+            val value: Boolean,
         ) : ProfileOperation
     }
 
