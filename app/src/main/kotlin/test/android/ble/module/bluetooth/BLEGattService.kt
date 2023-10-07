@@ -1078,9 +1078,7 @@ internal class BLEGattService : Service() {
                     Log.d(TAG, "All operations performed.")
                     return
                 }
-                else -> {
-                    TODO("State: $state. Type: ${state.type}. But no operation!")
-                }
+                else -> TODO("State: $state. Type: ${state.type}. But no operation!")
             }
         }
         when (state.type) {
@@ -1121,27 +1119,6 @@ internal class BLEGattService : Service() {
                     characteristic = operation.characteristic,
                     value = operation.value,
                 )
-            }
-        }
-    }
-    private fun onReadCharacteristic(
-        service: UUID,
-        characteristic: UUID,
-    ) {
-        Log.d(TAG, "On read $service/$characteristic...")
-        val state = state.value
-        if (state !is State.Connected) TODO("on read $service/$characteristic state: $state")
-        val operation = ProfileOperation.ReadCharacteristic(
-            service = service,
-            characteristic = characteristic,
-        )
-        profileOperations.add(operation)
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                performOperations()
-            }
-            else -> {
-                // noop
             }
         }
     }
@@ -1329,52 +1306,6 @@ internal class BLEGattService : Service() {
         )
     }
 
-    private fun onWriteCharacteristic(
-        service: UUID,
-        characteristic: UUID,
-        bytes: ByteArray,
-    ) {
-        Log.d(TAG, "On write characteristic ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
-        val state = state.value
-        if (state !is State.Connected) TODO("on write $service/$characteristic state: $state")
-        val operation = ProfileOperation.WriteCharacteristic(service = service, characteristic = characteristic, bytes)
-        profileOperations.add(operation)
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                performOperations()
-            }
-            else -> {
-                // noop
-            }
-        }
-    }
-
-    private fun onWriteDescriptor(
-        service: UUID,
-        characteristic: UUID,
-        descriptor: UUID,
-        bytes: ByteArray,
-    ) {
-        Log.d(TAG, "on write descriptor ${bytes.map { String.format("%03d", it.toInt() and 0xFF) }}...")
-        val state = state.value
-        if (state !is State.Connected) TODO("on write $descriptor of $service/$characteristic state: $state")
-        val operation = ProfileOperation.WriteDescriptor(
-            service = service,
-            characteristic = characteristic,
-            descriptor = descriptor,
-            bytes = bytes,
-        )
-        profileOperations.add(operation)
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                performOperations()
-            }
-            else -> {
-                // noop
-            }
-        }
-    }
-
     private fun onPair(pin: String?) {
         Log.d(TAG, "on pair...")
         val state = state.value
@@ -1461,6 +1392,60 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onWriteDescriptor(
+        service: UUID,
+        characteristic: UUID,
+        descriptor: UUID,
+        bytes: ByteArray,
+    ) {
+        Log.d(TAG, "on write $descriptor of $service/$characteristic...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on write $descriptor of $service/$characteristic state: $state")
+        val operation = ProfileOperation.WriteDescriptor(
+            service = service,
+            characteristic = characteristic,
+            descriptor = descriptor,
+            bytes = bytes,
+        )
+        profileOperations.add(operation)
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
+    }
+
+    private fun onWriteCharacteristic(
+        service: UUID,
+        characteristic: UUID,
+        bytes: ByteArray,
+    ) {
+        Log.d(TAG, "on write $service/$characteristic...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on write $service/$characteristic state: $state")
+        val operation = ProfileOperation.WriteCharacteristic(
+            service = service,
+            characteristic = characteristic,
+            bytes = bytes,
+        )
+        profileOperations.add(operation)
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
+    }
+
+    private fun onReadCharacteristic(
+        service: UUID,
+        characteristic: UUID,
+    ) {
+        Log.d(TAG, "on read $service/$characteristic...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on read $service/$characteristic state: $state")
+        val operation = ProfileOperation.ReadCharacteristic(
+            service = service,
+            characteristic = characteristic,
+        )
+        profileOperations.add(operation)
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
+    }
+
     private fun onSetCharacteristicNotification(
         service: UUID,
         characteristic: UUID,
@@ -1468,17 +1453,15 @@ internal class BLEGattService : Service() {
     ) {
         Log.d(TAG, "on set $service/$characteristic notification...")
         val state = state.value
-        if (state !is State.Connected) TODO("On set $service/$characteristic notification state: $state")
-        val operation = ProfileOperation.SetCharacteristicNotification(service = service, characteristic = characteristic, value = value)
+        if (state !is State.Connected) TODO("on set $service/$characteristic notification state: $state")
+        val operation = ProfileOperation.SetCharacteristicNotification(
+            service = service,
+            characteristic = characteristic,
+            value = value,
+        )
         profileOperations.add(operation)
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                performOperations()
-            }
-            else -> {
-                // noop
-            }
-        }
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
     }
 
     private fun onStartCommand(intent: Intent) {
@@ -1498,8 +1481,12 @@ internal class BLEGattService : Service() {
             Action.DISCONNECT -> onDisconnect()
             Action.REQUEST_SERVICES -> onRequestServices()
             Action.SET_CHARACTERISTIC_NOTIFICATION -> {
-                val extras = intent.extras ?: TODO("No extras!")
-                if (!extras.containsKey("value")) TODO("No value!")
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be set. Already disconnected.")
+                    return
+                }
+                if (!intent.hasExtra("value")) TODO("No value!")
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
                     ?: TODO("No service!")
@@ -1513,6 +1500,11 @@ internal class BLEGattService : Service() {
                 )
             }
             Action.READ_CHARACTERISTIC -> {
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be read. Already disconnected.")
+                    return
+                }
                 val service = intent.getStringExtra("service")
                     ?.let(UUID::fromString)
                     ?: TODO("No service!")
