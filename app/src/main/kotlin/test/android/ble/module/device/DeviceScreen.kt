@@ -42,6 +42,7 @@ import sp.ax.jc.clicks.clicks
 import sp.ax.jc.clicks.onClick
 import test.android.ble.App
 import test.android.ble.module.bluetooth.BLEGattService
+import test.android.ble.module.bluetooth.BLEProfileOperator
 import test.android.ble.util.android.BLEException
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.GattException
@@ -821,14 +822,14 @@ internal fun DeviceScreen(
     LaunchedEffect(Unit) {
         BLEGattService.Profile.broadcast.collect { broadcast ->
             when (broadcast) {
-                is BLEGattService.Profile.Broadcast.OnReadCharacteristic -> {
+                is BLEProfileOperator.Broadcast.OnReadCharacteristic -> {
                     lastOperationState.value = Operation.ReadCharacteristic(
                         service = broadcast.service,
                         characteristic = broadcast.characteristic,
                         bytes = broadcast.bytes,
                     )
                 }
-                is BLEGattService.Profile.Broadcast.OnWriteCharacteristic -> {
+                is BLEProfileOperator.Broadcast.OnWriteCharacteristic -> {
                     val bytes = broadcast.bytes
                     val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
                     viewModel.write(value)
@@ -838,7 +839,7 @@ internal fun DeviceScreen(
                         bytes = broadcast.bytes,
                     )
                 }
-                is BLEGattService.Profile.Broadcast.OnWriteDescriptor -> {
+                is BLEProfileOperator.Broadcast.OnWriteDescriptor -> {
                     val bytes = broadcast.bytes
                     val value = String.format("%0${bytes.size * 2}x", BigInteger(1, bytes))
                     viewModel.write(value)
@@ -849,17 +850,17 @@ internal fun DeviceScreen(
                         bytes = broadcast.bytes,
                     )
                 }
-                is BLEGattService.Profile.Broadcast.OnServicesDiscovered -> {
+                is BLEProfileOperator.Broadcast.OnServicesDiscovered -> {
                     // todo
                 }
-                is BLEGattService.Profile.Broadcast.OnChangeCharacteristic -> {
+                is BLEProfileOperator.Broadcast.OnChangeCharacteristic -> {
                     lastOperationState.value = Operation.ChangeCharacteristic(
                         service = broadcast.service,
                         characteristic = broadcast.characteristic,
                         bytes = broadcast.bytes,
                     )
                 }
-                is BLEGattService.Profile.Broadcast.OnSetCharacteristicNotification -> {
+                is BLEProfileOperator.Broadcast.OnSetCharacteristicNotification -> {
                     Log.d(TAG, "set ${broadcast.service}/${broadcast.characteristic} notification: ${broadcast.value}")
                 }
             }

@@ -650,7 +650,7 @@ internal class BLEGattService : Service() {
         }
         scope.launch {
             _profileBroadcast.emit(
-                Profile.Broadcast.OnChangeCharacteristic(
+                BLEProfileOperator.Broadcast.OnChangeCharacteristic(
                     service = characteristic.service.uuid,
                     characteristic = characteristic.uuid,
                     bytes = value,
@@ -663,10 +663,10 @@ internal class BLEGattService : Service() {
         val state = state.value
         if (state !is State.Connected) TODO("On characteristic read state: $state")
         if (state.type != State.Connected.Type.OPERATING) TODO("On characteristic read state type: ${state.type}")
-        performOperations()
+        profileOperator.perform()
         scope.launch {
             _profileBroadcast.emit(
-                Profile.Broadcast.OnReadCharacteristic(
+                BLEProfileOperator.Broadcast.OnReadCharacteristic(
                     service = characteristic.service.uuid,
                     characteristic = characteristic.uuid,
                     bytes = characteristic.value,
@@ -682,10 +682,10 @@ internal class BLEGattService : Service() {
             return
         }
         if (state.type != State.Connected.Type.OPERATING) TODO("on characteristic write state type: ${state.type}")
-        performOperations()
+        profileOperator.perform()
         scope.launch {
             _profileBroadcast.emit(
-                Profile.Broadcast.OnWriteCharacteristic(
+                BLEProfileOperator.Broadcast.OnWriteCharacteristic(
                     service = characteristic.service.uuid,
                     characteristic = characteristic.uuid,
                     bytes = characteristic.value,
@@ -696,12 +696,15 @@ internal class BLEGattService : Service() {
 
     private fun onDescriptorWrite(descriptor: BluetoothGattDescriptor) {
         val state = state.value
-        if (state !is State.Connected) TODO("On descriptor write state: $state")
+        if (state !is State.Connected) {
+            Log.d(TAG, "The writing results are no longer relevant. Disconnected.")
+            return
+        }
         if (state.type != State.Connected.Type.OPERATING) TODO("On descriptor write state type: ${state.type}")
-        _state.value = state.copy(type = State.Connected.Type.READY)
+        profileOperator.perform()
         scope.launch {
             _profileBroadcast.emit(
-                Profile.Broadcast.OnWriteDescriptor(
+                BLEProfileOperator.Broadcast.OnWriteDescriptor(
                     service = descriptor.characteristic.service.uuid,
                     characteristic = descriptor.characteristic.uuid,
                     descriptor = descriptor.uuid,
@@ -728,8 +731,8 @@ internal class BLEGattService : Service() {
         )
         scope.launch {
             _profileBroadcast.emit(
-                Profile.Broadcast.OnServicesDiscovered(
-                    gatt.services,
+                BLEProfileOperator.Broadcast.OnServicesDiscovered(
+                    gatt.services.map { it.uuid },
                 ),
             )
         }
@@ -1062,66 +1065,46 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private val profileOperations: Queue<ProfileOperation> = ConcurrentLinkedQueue() // todo type
-    private fun performOperations() {
-        val state = state.value
-        if (state !is State.Connected) TODO("perform operations state: $state")
-        val operation = profileOperations.poll()
-        if (operation == null) {
-            when (state.type) {
-                State.Connected.Type.READY -> {
-                    Log.d(TAG, "All operations already performed.")
-                    return
+    private val profilePerformer = object : BLEProfileOperator.Performer {
+        override fun perform(operation: BLEProfileOperator.Operation) {
+            when (operation) {
+                is BLEProfileOperator.Operation.WriteCharacteristic -> {
+                    writeCharacteristic(
+                        service = operation.service,
+                        characteristic = operation.characteristic,
+                        bytes = operation.bytes,
+                    )
                 }
-                State.Connected.Type.OPERATING -> {
-                    _state.value = state.copy(type = State.Connected.Type.READY)
-                    Log.d(TAG, "All operations performed.")
-                    return
+                is BLEProfileOperator.Operation.WriteDescriptor -> {
+                    writeDescriptor(
+                        service = operation.service,
+                        characteristic = operation.characteristic,
+                        descriptor = operation.descriptor,
+                        bytes = operation.bytes,
+                    )
                 }
-                else -> TODO("State: $state. Type: ${state.type}. But no operation!")
-            }
-        }
-        when (state.type) {
-            State.Connected.Type.READY -> {
-                Log.d(TAG, "Start perform operations...")
-                _state.value = state.copy(type = State.Connected.Type.OPERATING)
-            }
-            State.Connected.Type.OPERATING -> {
-                // noop
-            }
-            else -> TODO("perform operations state type: ${state.type}")
-        }
-        when (operation) {
-            is ProfileOperation.WriteCharacteristic -> {
-                writeCharacteristic(
-                    service = operation.service,
-                    characteristic = operation.characteristic,
-                    bytes = operation.bytes,
-                )
-            }
-            is ProfileOperation.WriteDescriptor -> {
-                writeDescriptor(
-                    service = operation.service,
-                    characteristic = operation.characteristic,
-                    descriptor = operation.descriptor,
-                    bytes = operation.bytes,
-                )
-            }
-            is ProfileOperation.ReadCharacteristic -> {
-                readCharacteristic(
-                    service = operation.service,
-                    characteristic = operation.characteristic,
-                )
-            }
-            is ProfileOperation.SetCharacteristicNotification -> {
-                setCharacteristicNotification(
-                    service = operation.service,
-                    characteristic = operation.characteristic,
-                    value = operation.value,
-                )
+                is BLEProfileOperator.Operation.ReadCharacteristic -> {
+                    readCharacteristic(
+                        service = operation.service,
+                        characteristic = operation.characteristic,
+                    )
+                }
+                is BLEProfileOperator.Operation.SetCharacteristicNotification -> {
+                    setCharacteristicNotification(
+                        service = operation.service,
+                        characteristic = operation.characteristic,
+                        value = operation.value,
+                    )
+                }
             }
         }
     }
+    private val profileOperator = BLEProfileOperator(
+        scope = scope,
+        performer = profilePerformer,
+    )
+
+    // profile
 
     private fun writeCharacteristic(
         service: UUID,
@@ -1147,20 +1130,12 @@ internal class BLEGattService : Service() {
                 // todo
             },
             onFailure = {
-                when (it) {
-                    is GattException -> {
-                        when (it.type) {
-                            GattException.Type.CHARACTERISTIC_WRITING_WAS_NOT_INITIATED -> {
-                                Log.w(TAG, "Writing $service/$characteristic was not initiated!")
-                            }
-                            else -> {
-                                // noop
-                            }
-                        }
-                    }
-                    else -> {
-                        TODO("write $service/$characteristic error: $it")
-                    }
+                if (it is GattException && it.type == GattException.Type.CHARACTERISTIC_WRITING_WAS_NOT_INITIATED) {
+                    Log.w(TAG, "Writing $service/$characteristic was not initiated!")
+                    _broadcast.emit(Broadcast.OnError(it))
+                    profileOperator.perform()
+                } else {
+                    TODO("write $service/$characteristic error: $it")
                 }
             },
         )
@@ -1192,20 +1167,12 @@ internal class BLEGattService : Service() {
                 // todo
             },
             onFailure = {
-                when (it) {
-                    is GattException -> {
-                        when (it.type) {
-                            GattException.Type.DESCRIPTOR_WRITING_WAS_NOT_INITIATED -> {
-                                Log.w(TAG, "Writing $descriptor of $service/$characteristic was not initiated!")
-                            }
-                            else -> {
-                                // noop
-                            }
-                        }
-                    }
-                    else -> {
-                        TODO("write $service/$characteristic error: $it")
-                    }
+                if (it is GattException && it.type == GattException.Type.DESCRIPTOR_WRITING_WAS_NOT_INITIATED) {
+                    Log.w(TAG, "Writing $descriptor of $service/$characteristic was not initiated!")
+                    _broadcast.emit(Broadcast.OnError(it))
+                    profileOperator.perform()
+                } else {
+                    TODO("write $descriptor of $service/$characteristic error: $it")
                 }
             },
         )
@@ -1236,35 +1203,12 @@ internal class BLEGattService : Service() {
                 if (it is GattException && it.type == GattException.Type.READING_WAS_NOT_INITIATED) {
                     Log.w(TAG, "Reading $service/$characteristic was not initiated!")
                     _broadcast.emit(Broadcast.OnError(it))
-                    performOperations()
+                    profileOperator.perform()
                 } else {
                     TODO("read $service/$characteristic error: $it")
                 }
             },
         )
-    }
-
-    private fun onNotificationStatusSet(
-        service: UUID,
-        characteristic: UUID,
-        value: Boolean,
-    ) {
-        val state = state.value
-        if (state !is State.Connected) {
-            Log.d(TAG, "The setting results are no longer relevant. Disconnected.")
-            return
-        }
-        if (state.type != State.Connected.Type.OPERATING) TODO("on $service/$characteristic notification set state type: ${state.type}")
-        performOperations()
-        scope.launch {
-            _profileBroadcast.emit(
-                Profile.Broadcast.OnSetCharacteristicNotification(
-                    service = service,
-                    characteristic = characteristic,
-                    value = value,
-                ),
-            )
-        }
     }
 
     private fun setCharacteristicNotification(
@@ -1298,12 +1242,37 @@ internal class BLEGattService : Service() {
                 if (it is GattException && it.type == GattException.Type.NOTIFICATION_STATUS_WAS_NOT_SUCCESSFULLY_SET) {
                     Log.w(TAG, "The $service/$characteristic notification status was not successfully set!")
                     _broadcast.emit(Broadcast.OnError(it))
-                    performOperations()
+                    profileOperator.perform()
                 } else {
                     TODO("set $service/$characteristic notification error: $it")
                 }
             },
         )
+    }
+
+    //
+
+    private fun onNotificationStatusSet(
+        service: UUID,
+        characteristic: UUID,
+        value: Boolean,
+    ) {
+        val state = state.value
+        if (state !is State.Connected) {
+            Log.d(TAG, "The setting results are no longer relevant. Disconnected.")
+            return
+        }
+        if (state.type != State.Connected.Type.OPERATING) TODO("on $service/$characteristic notification set state type: ${state.type}")
+        profileOperator.perform()
+        scope.launch {
+            _profileBroadcast.emit(
+                BLEProfileOperator.Broadcast.OnSetCharacteristicNotification(
+                    service = service,
+                    characteristic = characteristic,
+                    value = value,
+                ),
+            )
+        }
     }
 
     private fun onPair(pin: String?) {
@@ -1392,78 +1361,6 @@ internal class BLEGattService : Service() {
         }
     }
 
-    private fun onWriteDescriptor(
-        service: UUID,
-        characteristic: UUID,
-        descriptor: UUID,
-        bytes: ByteArray,
-    ) {
-        Log.d(TAG, "on write $descriptor of $service/$characteristic...")
-        val state = state.value
-        if (state !is State.Connected) TODO("on write $descriptor of $service/$characteristic state: $state")
-        val operation = ProfileOperation.WriteDescriptor(
-            service = service,
-            characteristic = characteristic,
-            descriptor = descriptor,
-            bytes = bytes,
-        )
-        profileOperations.add(operation)
-        if (state.type != State.Connected.Type.READY) return
-        performOperations()
-    }
-
-    private fun onWriteCharacteristic(
-        service: UUID,
-        characteristic: UUID,
-        bytes: ByteArray,
-    ) {
-        Log.d(TAG, "on write $service/$characteristic...")
-        val state = state.value
-        if (state !is State.Connected) TODO("on write $service/$characteristic state: $state")
-        val operation = ProfileOperation.WriteCharacteristic(
-            service = service,
-            characteristic = characteristic,
-            bytes = bytes,
-        )
-        profileOperations.add(operation)
-        if (state.type != State.Connected.Type.READY) return
-        performOperations()
-    }
-
-    private fun onReadCharacteristic(
-        service: UUID,
-        characteristic: UUID,
-    ) {
-        Log.d(TAG, "on read $service/$characteristic...")
-        val state = state.value
-        if (state !is State.Connected) TODO("on read $service/$characteristic state: $state")
-        val operation = ProfileOperation.ReadCharacteristic(
-            service = service,
-            characteristic = characteristic,
-        )
-        profileOperations.add(operation)
-        if (state.type != State.Connected.Type.READY) return
-        performOperations()
-    }
-
-    private fun onSetCharacteristicNotification(
-        service: UUID,
-        characteristic: UUID,
-        value: Boolean,
-    ) {
-        Log.d(TAG, "on set $service/$characteristic notification...")
-        val state = state.value
-        if (state !is State.Connected) TODO("on set $service/$characteristic notification state: $state")
-        val operation = ProfileOperation.SetCharacteristicNotification(
-            service = service,
-            characteristic = characteristic,
-            value = value,
-        )
-        profileOperations.add(operation)
-        if (state.type != State.Connected.Type.READY) return
-        performOperations()
-    }
-
     private fun onStartCommand(intent: Intent) {
         val intentAction = intent.action ?: TODO("No intent action!")
         if (intentAction.isEmpty()) TODO("Intent action is empty!")
@@ -1493,7 +1390,7 @@ internal class BLEGattService : Service() {
                 val characteristic = intent.getStringExtra("characteristic")
                     ?.let(UUID::fromString)
                     ?: TODO("No characteristic!")
-                onSetCharacteristicNotification(
+                profileOperator.onSetCharacteristicNotification(
                     service = service,
                     characteristic = characteristic,
                     value = intent.getBooleanExtra("value", false),
@@ -1511,7 +1408,7 @@ internal class BLEGattService : Service() {
                 val characteristic = intent.getStringExtra("characteristic")
                     ?.let(UUID::fromString)
                     ?: TODO("No characteristic!")
-                onReadCharacteristic(
+                profileOperator.onReadCharacteristic(
                     service = service,
                     characteristic = characteristic,
                 )
@@ -1529,7 +1426,7 @@ internal class BLEGattService : Service() {
                 val characteristic = intent.getStringExtra("characteristic")
                     ?.let(UUID::fromString)
                     ?: TODO("No characteristic!")
-                onWriteCharacteristic(
+                profileOperator.onWriteCharacteristic(
                     service = service,
                     characteristic = characteristic,
                     bytes = bytes,
@@ -1551,7 +1448,7 @@ internal class BLEGattService : Service() {
                 val descriptor = intent.getStringExtra("descriptor")
                     ?.let(UUID::fromString)
                     ?: TODO("No descriptor!")
-                onWriteDescriptor(
+                profileOperator.onWriteDescriptor(
                     service = service,
                     characteristic = characteristic,
                     descriptor = descriptor,
@@ -1670,19 +1567,31 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onEvent(event: BLEProfileOperator.Event) {
+        val state = state.value
+        if (state !is State.Connected) {
+            Log.d(TAG, "The event $event are no longer relevant. Disconnected.")
+            return
+        }
+        when (event) {
+            BLEProfileOperator.Event.OnOperating -> {
+                _state.value = state.copy(type = State.Connected.Type.OPERATING)
+            }
+            BLEProfileOperator.Event.OnReady -> {
+                _state.value = state.copy(type = State.Connected.Type.READY)
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "on create[${hashCode()}]...") // todo
         state
             .onEach(::onState)
-//            .onEach { newState ->
-//                oldState.also {
-//                    if (it != newState) {
-//                        onNewState(it, newState)
-//                        oldState = newState
-//                    }
-//                }
-//            }
+            .launchIn(scope)
+        BLEProfileOperator
+            .event
+            .onEach(::onEvent)
             .launchIn(scope)
     }
 
@@ -1730,38 +1639,6 @@ internal class BLEGattService : Service() {
     }
 
     object Profile {
-        sealed interface Broadcast {
-            class OnWriteCharacteristic(
-                val service: UUID,
-                val characteristic: UUID,
-                val bytes: ByteArray,
-            ) : Broadcast
-            class OnWriteDescriptor(
-                val service: UUID,
-                val characteristic: UUID,
-                val descriptor: UUID,
-                val bytes: ByteArray,
-            ) : Broadcast
-            class OnReadCharacteristic(
-                val service: UUID,
-                val characteristic: UUID,
-                val bytes: ByteArray,
-            ) : Broadcast
-            class OnChangeCharacteristic(
-                val service: UUID,
-                val characteristic: UUID,
-                val bytes: ByteArray,
-            ) : Broadcast
-            class OnServicesDiscovered(
-                val services: List<BluetoothGattService>, // todo platform!
-            ) : Broadcast
-            class OnSetCharacteristicNotification(
-                val service: UUID,
-                val characteristic: UUID,
-                val value: Boolean,
-            ) : Broadcast
-        }
-
         val broadcast = _profileBroadcast.asSharedFlow()
 
         fun requestServices(context: Context) {
@@ -1837,7 +1714,7 @@ internal class BLEGattService : Service() {
         @JvmStatic
         val state = _state.asStateFlow()
 
-        private val _profileBroadcast = MutableSharedFlow<Profile.Broadcast>()
+        private val _profileBroadcast = MutableSharedFlow<BLEProfileOperator.Broadcast>()
 
         fun intent(context: Context, action: Action): Intent {
             val intent = Intent(context, BLEGattService::class.java)
