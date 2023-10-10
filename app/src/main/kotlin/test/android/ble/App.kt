@@ -20,9 +20,8 @@ import test.android.ble.module.bluetooth.BLEGattService
 import test.android.ble.module.bluetooth.BLEScannerService
 import test.android.ble.provider.Contexts
 import test.android.ble.provider.local.FinalLocalDataProvider
-import test.android.ble.util.ForegroundUtil
-import test.android.ble.util.android.startForeground
 import test.android.ble.util.android.stopForeground
+import test.android.ble.util.notifyAndStartForeground
 
 internal class App : Application() {
     private var _lifecycle: Lifecycle? = null
@@ -42,16 +41,10 @@ internal class App : Application() {
             BLEScannerService.State.STARTED -> {
                 val intent = Intent(this, BLEScannerService::class.java)
                 intent.action = BLEScannerService.ACTION_SCAN_STOP
-                val notification = ForegroundUtil.buildNotification(
-                    context = this,
+                notifyAndStartForeground<BLEScannerService>(
+                    intent = intent,
                     title = "scanning...",
-                    action = "stop",
-                    intent = ForegroundUtil.getService(this, intent),
-                )
-                ForegroundUtil.notify(this, notification)
-                startForeground<BLEScannerService>(
-                    notificationId = ForegroundUtil.NOTIFICATION_ID,
-                    notification = notification,
+                    button = "stop",
                 )
             }
             BLEScannerService.State.STOPPED -> {
@@ -63,64 +56,33 @@ internal class App : Application() {
         }
     }
 
-    private fun startForeground(
-        title: String,
-        action: BLEGattService.Action,
-        button: String,
-    ) {
-        val intent = BLEGattService.intent(context = this, action = action)
-        val notification = ForegroundUtil.buildNotification(
-            context = this,
-            title = title,
-            action = button,
-            intent = ForegroundUtil.getService(this, intent),
-        )
-        ForegroundUtil.notify(context = this, notification = notification)
-        startForeground<BLEGattService>(
-            notificationId = ForegroundUtil.NOTIFICATION_ID,
-            notification = notification,
-        )
-    }
-
-    private fun startForeground(title: String) {
-        val notification = ForegroundUtil.buildNotification(
-            context = this,
-            title = title,
-        )
-        ForegroundUtil.notify(this, notification = notification)
-        startForeground<BLEGattService>(
-            notificationId = ForegroundUtil.NOTIFICATION_ID,
-            notification = notification,
-        )
-    }
-
     private fun onEvent(event: BLEGattService.Event) {
         when (event) {
             is BLEGattService.Event.OnConnected -> {
-                startForeground(
+                notifyAndStartForeground(
                     title = "connected ${event.address}",
                     action = BLEGattService.Action.DISCONNECT,
                     button = "disconnect",
                 )
             }
             is BLEGattService.Event.OnConnecting -> {
-                startForeground(title = "connecting ${event.address}...")
+                notifyAndStartForeground<BLEGattService>(title = "connecting ${event.address}...")
             }
             BLEGattService.Event.OnDisconnected -> {
                 stopForeground<BLEGattService>()
             }
             is BLEGattService.Event.OnDisconnecting -> {
-                startForeground(title = "disconnecting ${event.address}...")
+                notifyAndStartForeground<BLEGattService>(title = "disconnecting ${event.address}...")
             }
             is BLEGattService.Event.OnSearchComing -> {
-                startForeground(
+                notifyAndStartForeground(
                     title = "searching ${event.address}...",
                     action = BLEGattService.Action.SEARCH_STOP,
                     button = "stop",
                 )
             }
             BLEGattService.Event.OnSearchWaiting -> {
-                startForeground(
+                notifyAndStartForeground(
                     title = "search waiting...",
                     action = BLEGattService.Action.SEARCH_STOP,
                     button = "stop",

@@ -10,17 +10,14 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import test.android.ble.R
+import test.android.ble.module.bluetooth.BLEGattService
+import test.android.ble.util.android.startForeground
 import kotlin.math.absoluteValue
 
 internal object ForegroundUtil {
     private val CHANNEL_ID = "${this::class.java.name}:CHANNEL"
     private const val CHANNEL_NAME = "BLE Sample"
     val NOTIFICATION_ID = System.currentTimeMillis().toInt().absoluteValue
-
-    private fun Service.startForeground(notification: Notification) {
-        notify(this, notification)
-        startForeground(NOTIFICATION_ID, notification)
-    }
 
     fun notify(context: Context, notification: Notification) {
         val notificationManager = context.getSystemService(NotificationManager::class.java)
@@ -46,13 +43,6 @@ internal object ForegroundUtil {
                 ),
             )
         }
-    }
-
-    internal fun startForeground(
-        service: Service,
-        title: String,
-    ) {
-        service.startForeground(service.builder(title).build())
     }
 
     fun getService(
@@ -82,31 +72,46 @@ internal object ForegroundUtil {
             .builder(title)
             .build()
     }
+}
 
-    private fun startForeground(
-        service: Service,
-        title: String,
-        action: String,
-        intent: PendingIntent,
-    ) {
-        val notification = service
-            .builder(title)
-            .addAction(-1, action, intent)
-            .build()
-        service.startForeground(notification)
-    }
+internal inline fun <reified T : Service> Context.notifyAndStartForeground(
+    intent: Intent,
+    title: String,
+    button: String,
+) {
+    val notification = ForegroundUtil.buildNotification(
+        context = this,
+        title = title,
+        action = button,
+        intent = ForegroundUtil.getService(this, intent),
+    )
+    ForegroundUtil.notify(context = this, notification = notification)
+    startForeground<T>(
+        notificationId = ForegroundUtil.NOTIFICATION_ID,
+        notification = notification,
+    )
+}
 
-    fun startForeground(
-        service: Service,
-        title: String,
-        action: String,
-        intent: Intent,
-    ) {
-        return startForeground(
-            service = service,
-            title = title,
-            action = action,
-            intent = PendingIntent.getService(service, -1, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT),
-        )
-    }
+internal fun Context.notifyAndStartForeground(
+    title: String,
+    action: BLEGattService.Action,
+    button: String,
+) {
+    notifyAndStartForeground<BLEGattService>(
+        intent = BLEGattService.intent(context = this, action = action),
+        title = title,
+        button = button,
+    )
+}
+
+internal inline fun <reified T : Service> Context.notifyAndStartForeground(title: String) {
+    val notification = ForegroundUtil.buildNotification(
+        context = this,
+        title = title,
+    )
+    ForegroundUtil.notify(this, notification = notification)
+    startForeground<T>(
+        notificationId = ForegroundUtil.NOTIFICATION_ID,
+        notification = notification,
+    )
 }
