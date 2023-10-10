@@ -146,7 +146,6 @@ internal class BLEScannerService : Service() {
                     _state.value = State.STOPPED
                 },
             )
-            stopForeground(STOP_FOREGROUND_REMOVE)
             unregisterReceiver(receivers)
         }
     }
@@ -162,6 +161,10 @@ internal class BLEScannerService : Service() {
                 val notificationId: Int = ServiceUtil.getNotificationId(intent)
                 val notification: Notification = ServiceUtil.getNotification(intent)
                 startForeground(notificationId, notification)
+            }
+            ServiceUtil.ACTION_STOP_FOREGROUND -> {
+                val notificationBehavior: Int = ServiceUtil.getNotificationBehavior(intent)
+                stopForeground(notificationBehavior)
             }
         }
     }

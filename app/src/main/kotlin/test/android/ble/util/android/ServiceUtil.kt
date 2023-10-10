@@ -63,3 +63,25 @@ internal object ServiceUtil {
         context.startService(intent)
     }
 }
+
+internal inline fun <reified T : Service> Context.startForeground(
+    notificationId: Int,
+    notification: Notification,
+) {
+    ServiceUtil.startForeground(
+        context = this,
+        type = T::class.java,
+        notificationId = notificationId,
+        notification = notification,
+    )
+}
+
+internal inline fun <reified T : Service> Context.stopForeground(
+    notificationBehavior: Int = Service.STOP_FOREGROUND_REMOVE,
+) {
+    ServiceUtil.stopForeground(
+        context = this,
+        type = T::class.java,
+        notificationBehavior = notificationBehavior,
+    )
+}
