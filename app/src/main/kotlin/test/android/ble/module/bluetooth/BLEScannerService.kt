@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import test.android.ble.entity.BTDevice
+import test.android.ble.util.android.ServiceUtil
 
 internal class BLEScannerService : Service() {
     sealed interface Broadcast {
@@ -145,7 +146,6 @@ internal class BLEScannerService : Service() {
                     _state.value = State.STOPPED
                 },
             )
-            stopForeground(STOP_FOREGROUND_REMOVE)
             unregisterReceiver(receivers)
         }
     }
@@ -157,12 +157,14 @@ internal class BLEScannerService : Service() {
                 onScanStart(scanSettings = scanSettings)
             }
             ACTION_SCAN_STOP -> onScanStop()
-            ACTION_START_FOREGROUND -> {
-                if (!intent.hasExtra("notificationId")) TODO()
-                val notificationId = intent.getIntExtra("notificationId", -1)
-                if (!intent.hasExtra("notification")) TODO()
-                val notification = intent.getParcelableExtra<Notification>("notification") ?: TODO()
+            ServiceUtil.ACTION_START_FOREGROUND -> {
+                val notificationId: Int = ServiceUtil.getNotificationId(intent)
+                val notification: Notification = ServiceUtil.getNotification(intent)
                 startForeground(notificationId, notification)
+            }
+            ServiceUtil.ACTION_STOP_FOREGROUND -> {
+                val notificationBehavior: Int = ServiceUtil.getNotificationBehavior(intent)
+                stopForeground(notificationBehavior)
             }
         }
     }
@@ -180,7 +182,6 @@ internal class BLEScannerService : Service() {
         private const val TAG = "[BLE|SS]"
         val ACTION_SCAN_START = "${this::class.java.name}:ACTION_SCAN_START"
         val ACTION_SCAN_STOP = "${this::class.java.name}:ACTION_SCAN_STOP"
-        val ACTION_START_FOREGROUND = "${this::class.java.name}:ACTION_START_FOREGROUND"
 
         private val _broadcast = MutableSharedFlow<Broadcast>()
         @JvmStatic
@@ -201,15 +202,6 @@ internal class BLEScannerService : Service() {
         fun scanStop(context: Context) {
             val intent = Intent(context, BLEScannerService::class.java)
             intent.action = ACTION_SCAN_STOP
-            context.startService(intent)
-        }
-
-        @JvmStatic
-        fun startForeground(context: Context, notificationId: Int, notification: Notification) {
-            val intent = Intent(context, BLEScannerService::class.java)
-            intent.action = ACTION_START_FOREGROUND
-            intent.putExtra("notificationId", notificationId)
-            intent.putExtra("notification", notification)
             context.startService(intent)
         }
     }

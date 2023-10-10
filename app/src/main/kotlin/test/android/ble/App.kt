@@ -12,8 +12,6 @@ import androidx.lifecycle.coroutineScope
 import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import test.android.ble.module.app.AbstractViewModel
@@ -23,6 +21,8 @@ import test.android.ble.module.bluetooth.BLEScannerService
 import test.android.ble.provider.Contexts
 import test.android.ble.provider.local.FinalLocalDataProvider
 import test.android.ble.util.ForegroundUtil
+import test.android.ble.util.android.startForeground
+import test.android.ble.util.android.stopForeground
 
 internal class App : Application() {
     private var _lifecycle: Lifecycle? = null
@@ -49,11 +49,13 @@ internal class App : Application() {
                     intent = ForegroundUtil.getService(this, intent),
                 )
                 ForegroundUtil.notify(this, notification)
-                BLEScannerService.startForeground(
-                    context = this,
+                startForeground<BLEScannerService>(
                     notificationId = ForegroundUtil.NOTIFICATION_ID,
-                    notification,
+                    notification = notification,
                 )
+            }
+            BLEScannerService.State.STOPPED -> {
+                stopForeground<BLEScannerService>()
             }
             else -> {
                 // noop
@@ -74,10 +76,9 @@ internal class App : Application() {
             intent = ForegroundUtil.getService(this, intent),
         )
         ForegroundUtil.notify(context = this, notification = notification)
-        BLEGattService.startForeground(
-            context = this,
+        startForeground<BLEGattService>(
             notificationId = ForegroundUtil.NOTIFICATION_ID,
-            notification,
+            notification = notification,
         )
     }
 
@@ -87,8 +88,7 @@ internal class App : Application() {
             title = title,
         )
         ForegroundUtil.notify(this, notification = notification)
-        BLEGattService.startForeground(
-            context = this,
+        startForeground<BLEGattService>(
             notificationId = ForegroundUtil.NOTIFICATION_ID,
             notification = notification,
         )
@@ -107,7 +107,7 @@ internal class App : Application() {
                 startForeground(title = "connecting ${event.address}...")
             }
             BLEGattService.Event.OnDisconnected -> {
-                // noop
+                stopForeground<BLEGattService>()
             }
             is BLEGattService.Event.OnDisconnecting -> {
                 startForeground(title = "disconnecting ${event.address}...")

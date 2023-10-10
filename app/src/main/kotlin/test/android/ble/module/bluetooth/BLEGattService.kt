@@ -39,6 +39,7 @@ import test.android.ble.util.android.GattException
 import test.android.ble.util.android.GattUtil
 import test.android.ble.util.android.LocException
 import test.android.ble.util.android.PairException
+import test.android.ble.util.android.ServiceUtil
 import test.android.ble.util.android.checkPIN
 import test.android.ble.util.android.isBTEnabled
 import test.android.ble.util.android.isLocationEnabled
@@ -825,16 +826,14 @@ internal class BLEGattService : Service() {
             Log.w(TAG, "Close gatt $address error: $e")
         }
         gatt = null
-        stopForeground(STOP_FOREGROUND_REMOVE)
         fromWaiting()
     }
 
     private suspend fun toComing() {
         val state = state.value
-        if (state !is State.Search) TODO()
-        if (state.type != State.Search.Type.WAITING) TODO()
-        val scanSettings = scanSettings ?: TODO()
-        val service: Service = this
+        if (state !is State.Search) TODO("To coming state: $state")
+        if (state.type != State.Search.Type.WAITING) TODO("To coming state type: ${state.type}")
+        val scanSettings = scanSettings ?: TODO("State search. Type waiting. But no scan settings!")
         _state.value = State.Search(
             address = state.address,
             type = State.Search.Type.TO_COMING,
@@ -859,14 +858,17 @@ internal class BLEGattService : Service() {
 
     private fun fromWaiting() {
         Log.d(TAG, "from waiting...")
+        val state = state.value
+        if (state !is State.Search) TODO("From waiting state: $state")
+        if (state.type != State.Search.Type.WAITING) TODO("From waiting state type: ${state.type}")
         scope.launch {
-            val state = state.value
-            if (state !is State.Search) TODO()
-            if (state.type != State.Search.Type.WAITING) TODO()
-            if (runCatching { isBTEnabled() }.getOrDefault(false) && isLocationEnabled()) {
-                toComing()
+            val isBTEnabled = runCatching(::isBTEnabled).getOrDefault(false)
+            if (!isBTEnabled) {
+                Log.w(TAG, "BT disabled!")
+            } else if (!isLocationEnabled()) {
+                Log.w(TAG, "Location disabled!")
             } else {
-//                startForegroundWaiting()
+                toComing()
             }
         }
     }
@@ -874,8 +876,8 @@ internal class BLEGattService : Service() {
     private fun toWaiting() {
         Log.d(TAG, "to waiting...")
         val state = state.value
-        if (state !is State.Search) TODO()
-        if (state.type != State.Search.Type.COMING) TODO()
+        if (state !is State.Search) TODO("To waiting state: $state")
+        if (state.type != State.Search.Type.COMING) TODO("To waiting state type: ${state.type}")
         _state.value = State.Search(
             address = state.address,
             type = State.Search.Type.TO_WAITING,
@@ -1566,14 +1568,20 @@ internal class BLEGattService : Service() {
                 onPair(pin)
             }
             Action.UNPAIR -> onUnpair()
-            Action.START_FOREGROUND -> {
-                if (!intent.hasExtra("notificationId")) TODO()
-                val notificationId = intent.getIntExtra("notificationId", -1)
-                if (!intent.hasExtra("notification")) TODO()
-                val notification = intent.getParcelableExtra<Notification>("notification") ?: TODO()
-                startForeground(notificationId, notification)
+            else -> {
+                when (intentAction) {
+                    ServiceUtil.ACTION_START_FOREGROUND -> {
+                        val notificationId: Int = ServiceUtil.getNotificationId(intent)
+                        val notification: Notification = ServiceUtil.getNotification(intent)
+                        startForeground(notificationId, notification)
+                    }
+                    ServiceUtil.ACTION_STOP_FOREGROUND -> {
+                        val notificationBehavior: Int = ServiceUtil.getNotificationBehavior(intent)
+                        stopForeground(notificationBehavior)
+                    }
+                    else -> TODO("Unknown action: $intentAction!")
+                }
             }
-            else -> TODO("Unknown action: ${intent.action}!")
         }
     }
 
@@ -1703,7 +1711,6 @@ internal class BLEGattService : Service() {
         WRITE_DESCRIPTOR,
         PAIR,
         UNPAIR,
-        START_FOREGROUND,
     }
 
     private sealed interface ProfileOperation {
@@ -1879,14 +1886,6 @@ internal class BLEGattService : Service() {
 
         fun unpair(context: Context) {
             val intent = intent(context, Action.UNPAIR)
-            context.startService(intent)
-        }
-
-        @JvmStatic
-        fun startForeground(context: Context, notificationId: Int, notification: Notification) {
-            val intent = intent(context, Action.START_FOREGROUND)
-            intent.putExtra("notificationId", notificationId)
-            intent.putExtra("notification", notification)
             context.startService(intent)
         }
     }
