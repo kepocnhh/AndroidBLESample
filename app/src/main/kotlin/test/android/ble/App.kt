@@ -76,10 +76,9 @@ internal class App : Application() {
             intent = ForegroundUtil.getService(this, intent),
         )
         ForegroundUtil.notify(context = this, notification = notification)
-        BLEGattService.startForeground(
-            context = this,
+        startForeground<BLEGattService>(
             notificationId = ForegroundUtil.NOTIFICATION_ID,
-            notification,
+            notification = notification,
         )
     }
 
@@ -89,8 +88,7 @@ internal class App : Application() {
             title = title,
         )
         ForegroundUtil.notify(this, notification = notification)
-        BLEGattService.startForeground(
-            context = this,
+        startForeground<BLEGattService>(
             notificationId = ForegroundUtil.NOTIFICATION_ID,
             notification = notification,
         )
@@ -109,7 +107,7 @@ internal class App : Application() {
                 startForeground(title = "connecting ${event.address}...")
             }
             BLEGattService.Event.OnDisconnected -> {
-                // noop
+                stopForeground<BLEGattService>()
             }
             is BLEGattService.Event.OnDisconnecting -> {
                 startForeground(title = "disconnecting ${event.address}...")
