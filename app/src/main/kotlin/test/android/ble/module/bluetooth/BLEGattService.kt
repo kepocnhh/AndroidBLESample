@@ -501,6 +501,9 @@ internal class BLEGattService : Service() {
                         }
                         BluetoothDevice.BOND_NONE -> {
                             when (oldState) {
+                                BluetoothDevice.BOND_BONDED -> {
+                                    onUnpair(device)
+                                }
                                 BluetoothDevice.BOND_BONDING -> {
                                     pin = null
                                     val extras = intent.extras ?: TODO("No extras!")
@@ -595,11 +598,23 @@ internal class BLEGattService : Service() {
         }
     }
 
+    private fun onUnpair(device: BluetoothDevice) {
+        val state = state.value
+        if (state !is State.Connected) TODO("State: $state!")
+        if (state.type != State.Connected.Type.UNPAIRING) TODO("State type: ${state.type}!")
+        if (!state.isPaired) TODO("Already unpaired!")
+        if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
+        Log.d(TAG, "on unpair: ${device.address}")
+        _state.value = state.copy(type = State.Connected.Type.READY, isPaired = false)
+    }
+
     private fun onBonded(device: BluetoothDevice) {
         val state = state.value
         if (state !is State.Connected) TODO("State: $state!")
         if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
+        if (state.isPaired) TODO("Already paired!")
         if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
+        Log.d(TAG, "on bonded: ${device.address}")
         _state.value = state.copy(type = State.Connected.Type.READY, isPaired = true)
         scope.launch {
             _broadcast.emit(
