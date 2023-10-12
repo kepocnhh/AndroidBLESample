@@ -368,10 +368,9 @@ private fun Characteristics(
 
 @Composable
 private fun Descriptors(
-    visible: Boolean,
-    onDismissRequest: () -> Unit,
+    writeState: MutableState<Boolean?>,
     gattState: BLEGattService.State,
-    servicesSupplier: () -> List<BluetoothGattService>,
+    services: List<BluetoothGattService>,
     writes: Set<String>,
 ) {
     if (gattState !is BLEGattService.State.Connected) return
@@ -383,11 +382,13 @@ private fun Descriptors(
     val selectedDescriptorState = remember { mutableStateOf<Triple<UUID, UUID, UUID>?>(null) }
     val selectValueState = remember { mutableStateOf<Triple<UUID, UUID, UUID>?>(null) }
     DialogListSelect(
-        visible = visible,
-        onDismissRequest = onDismissRequest,
+        visible = writeState.value ?: false,
+        onDismissRequest = {
+            writeState.value = null
+        },
         title = "Service",
         itemsSupplier = {
-            servicesSupplier().map { it.uuid }.sorted()
+            services.map { it.uuid }.sorted()
         },
         onSelect = {
             selectedServiceState.value = it
@@ -401,7 +402,7 @@ private fun Descriptors(
         title = "Characteristic",
         itemsSupplier = {
             val serviceUUID = selectedServiceState.value!!
-            val service = servicesSupplier().firstOrNull { it.uuid == serviceUUID }
+            val service = services.firstOrNull { it.uuid == serviceUUID }
             if (service == null) TODO()
             service.characteristics.map { it.uuid }.sorted()
         },
@@ -417,7 +418,7 @@ private fun Descriptors(
         title = "Descriptor",
         itemsSupplier = {
             val (serviceUUID, characteristicUUID) = selectedCharacteristicState.value!!
-            val service = servicesSupplier().firstOrNull { it.uuid == serviceUUID }
+            val service = services.firstOrNull { it.uuid == serviceUUID }
             if (service == null) TODO()
             val characteristic = service.characteristics.firstOrNull { it.uuid == characteristicUUID }
             if (characteristic == null) TODO()
@@ -637,18 +638,11 @@ internal fun DeviceScreen(
         services = discoveredServices.value,
         writes = writes.orEmpty(),
     )
-    val writeDescriptorsState = remember { mutableStateOf<Optional<List<BluetoothGattService>>?>(null) }
+    val writeDescriptorsState = remember { mutableStateOf<Boolean?>(null) }
     Descriptors(
-        visible = writeDescriptorsState.value is Optional.Some,
-        onDismissRequest = {
-            writeDescriptorsState.value = null
-        },
+        writeState = writeDescriptorsState,
         gattState = gattState,
-        servicesSupplier = {
-            val state = writeDescriptorsState.value
-            if (state !is Optional.Some) TODO()
-            state.value
-        },
+        services = discoveredServices.value,
         writes = writes.orEmpty(),
     )
     val clearWritesDialogState = remember { mutableStateOf(false) }
@@ -876,8 +870,9 @@ internal fun DeviceScreen(
                             writeCharacteristicsState.value = true
                             discoveredServices.value = broadcast.services
                         }
-                        writeDescriptorsState.value == Optional.None -> {
-                            writeDescriptorsState.value = Optional.Some(broadcast.services)
+                        writeDescriptorsState.value == false -> {
+                            writeDescriptorsState.value = true
+                            discoveredServices.value = broadcast.services
                         }
                     }
                 }
@@ -944,7 +939,7 @@ internal fun DeviceScreen(
                     val isReady = gattState.type == BLEGattService.State.Connected.Type.READY
                     Button(
                         text = "characteristics",
-                        enabled = isReady,
+                        enabled = isReady && writeCharacteristicsState.value == null,
                         onClick = {
                             writeCharacteristicsState.value = false
                             BLEGattService.Profile.requestServices(context)
@@ -955,9 +950,9 @@ internal fun DeviceScreen(
                     )
                     Button(
                         text = "write descriptor",
-                        enabled = isReady,
+                        enabled = isReady && writeDescriptorsState.value == null,
                         onClick = {
-                            writeDescriptorsState.value = Optional.None
+                            writeDescriptorsState.value = false
                             BLEGattService.Profile.requestServices(context)
                         },
                     )
