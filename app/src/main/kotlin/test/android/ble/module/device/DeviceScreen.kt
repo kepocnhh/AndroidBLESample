@@ -1,6 +1,7 @@
 package test.android.ble.module.device
 
 import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothGattService
 import android.bluetooth.le.ScanSettings
 import android.util.Log
 import androidx.compose.foundation.background
@@ -42,6 +43,7 @@ import sp.ax.jc.clicks.clicks
 import sp.ax.jc.clicks.onClick
 import test.android.ble.App
 import test.android.ble.module.bluetooth.BLEGattService
+import test.android.ble.util.Optional
 import test.android.ble.util.android.BLEException
 import test.android.ble.util.android.BTException
 import test.android.ble.util.android.GattException
@@ -263,8 +265,9 @@ private fun DialogEnterBytes(
 
 @Composable
 private fun Characteristics(
-    writeState: MutableState<Boolean>,
+    writeState: MutableState<Boolean?>,
     gattState: BLEGattService.State,
+    services: List<BluetoothGattService>,
     writes: Set<String>,
 ) {
     if (gattState !is BLEGattService.State.Connected) return
@@ -274,13 +277,13 @@ private fun Characteristics(
     val selectedCharacteristicState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
     val characteristicOptionsState = remember { mutableStateOf<Pair<UUID, UUID>?>(null) }
     DialogListSelect(
-        visible = writeState.value,
+        visible = writeState.value ?: false,
         onDismissRequest = {
-            writeState.value = false
+            writeState.value = null
         },
         title = "Service",
         itemsSupplier = {
-            gattState.services.keys.sorted()
+            services.map { it.uuid }.sorted()
         },
         onSelect = {
             selectedServiceState.value = it
@@ -294,7 +297,10 @@ private fun Characteristics(
         title = "Characteristic",
         itemsSupplier = {
             // todo writable
-            gattState.services[selectedServiceState.value!!]!!.keys.sorted()
+            val serviceUUID = selectedServiceState.value!!
+            val service = services.firstOrNull { it.uuid == serviceUUID }
+            if (service == null) TODO()
+            service.characteristics.map { it.uuid }.sorted()
         },
         onSelect = {
             selectedCharacteristicState.value = selectedServiceState.value!! to it
@@ -362,8 +368,10 @@ private fun Characteristics(
 
 @Composable
 private fun Descriptors(
-    writeState: MutableState<Boolean>,
+    visible: Boolean,
+    onDismissRequest: () -> Unit,
     gattState: BLEGattService.State,
+    servicesSupplier: () -> List<BluetoothGattService>,
     writes: Set<String>,
 ) {
     if (gattState !is BLEGattService.State.Connected) return
@@ -375,13 +383,11 @@ private fun Descriptors(
     val selectedDescriptorState = remember { mutableStateOf<Triple<UUID, UUID, UUID>?>(null) }
     val selectValueState = remember { mutableStateOf<Triple<UUID, UUID, UUID>?>(null) }
     DialogListSelect(
-        visible = writeState.value,
-        onDismissRequest = {
-            writeState.value = false
-        },
+        visible = visible,
+        onDismissRequest = onDismissRequest,
         title = "Service",
         itemsSupplier = {
-            gattState.services.keys.sorted()
+            servicesSupplier().map { it.uuid }.sorted()
         },
         onSelect = {
             selectedServiceState.value = it
@@ -394,7 +400,10 @@ private fun Descriptors(
         },
         title = "Characteristic",
         itemsSupplier = {
-            gattState.services[selectedService!!]!!.keys.sorted()
+            val serviceUUID = selectedServiceState.value!!
+            val service = servicesSupplier().firstOrNull { it.uuid == serviceUUID }
+            if (service == null) TODO()
+            service.characteristics.map { it.uuid }.sorted()
         },
         onSelect = {
             selectedCharacteristicState.value = selectedService!! to it
@@ -407,10 +416,12 @@ private fun Descriptors(
         },
         title = "Descriptor",
         itemsSupplier = {
-            val (service, characteristic) = selectedCharacteristicState.value!!
-            val characteristics = gattState.services[service]!!
-            val descriptors = characteristics[characteristic]!!
-            descriptors.sorted()
+            val (serviceUUID, characteristicUUID) = selectedCharacteristicState.value!!
+            val service = servicesSupplier().firstOrNull { it.uuid == serviceUUID }
+            if (service == null) TODO()
+            val characteristic = service.characteristics.firstOrNull { it.uuid == characteristicUUID }
+            if (characteristic == null) TODO()
+            characteristic.descriptors.map { it.uuid }.sorted()
         },
         onSelect = {
             val (service, characteristic) = selectedCharacteristicState.value!!
@@ -618,16 +629,26 @@ internal fun DeviceScreen(
 //            ),
 //        ),
 //    )
-    val writeCharacteristicsState = remember { mutableStateOf(false) }
+    val discoveredServices = remember { mutableStateOf<List<BluetoothGattService>>(emptyList()) }
+    val writeCharacteristicsState = remember { mutableStateOf<Boolean?>(null) }
     Characteristics(
         writeState = writeCharacteristicsState,
         gattState = gattState,
+        services = discoveredServices.value,
         writes = writes.orEmpty(),
     )
-    val writeDescriptorsState = remember { mutableStateOf(false) }
+    val writeDescriptorsState = remember { mutableStateOf<Optional<List<BluetoothGattService>>?>(null) }
     Descriptors(
-        writeState = writeDescriptorsState,
+        visible = writeDescriptorsState.value is Optional.Some,
+        onDismissRequest = {
+            writeDescriptorsState.value = null
+        },
         gattState = gattState,
+        servicesSupplier = {
+            val state = writeDescriptorsState.value
+            if (state !is Optional.Some) TODO()
+            state.value
+        },
         writes = writes.orEmpty(),
     )
     val clearWritesDialogState = remember { mutableStateOf(false) }
@@ -850,7 +871,15 @@ internal fun DeviceScreen(
                     )
                 }
                 is BLEGattService.Profile.Broadcast.OnServicesDiscovered -> {
-                    // todo
+                    when {
+                        writeCharacteristicsState.value == false -> {
+                            writeCharacteristicsState.value = true
+                            discoveredServices.value = broadcast.services
+                        }
+                        writeDescriptorsState.value == Optional.None -> {
+                            writeDescriptorsState.value = Optional.Some(broadcast.services)
+                        }
+                    }
                 }
                 is BLEGattService.Profile.Broadcast.OnChangeCharacteristic -> {
                     lastOperationState.value = Operation.ChangeCharacteristic(
@@ -915,9 +944,10 @@ internal fun DeviceScreen(
                     val isReady = gattState.type == BLEGattService.State.Connected.Type.READY
                     Button(
                         text = "characteristics",
-                        enabled = isReady && gattState.isPaired,
+                        enabled = isReady,
                         onClick = {
-                            writeCharacteristicsState.value = true
+                            writeCharacteristicsState.value = false
+                            BLEGattService.Profile.requestServices(context)
                         },
                         onLongClick = {
                             clearWritesDialogState.value = true
@@ -925,9 +955,10 @@ internal fun DeviceScreen(
                     )
                     Button(
                         text = "write descriptor",
-                        enabled = isReady && gattState.isPaired,
+                        enabled = isReady,
                         onClick = {
-                            writeDescriptorsState.value = true
+                            writeDescriptorsState.value = Optional.None
+                            BLEGattService.Profile.requestServices(context)
                         },
                     )
                     val pairText = when (gattState.type) {

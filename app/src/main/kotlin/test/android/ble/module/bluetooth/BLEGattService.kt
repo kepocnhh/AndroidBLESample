@@ -92,8 +92,6 @@ internal class BLEGattService : Service() {
             val address: String,
             val isPaired: Boolean,
             val type: Type,
-            @Deprecated("Connected.DISCOVER")
-            val services: Map<UUID, Map<UUID, Set<UUID>>>,
         ) : State {
             enum class Type {
                 READY,
@@ -104,7 +102,11 @@ internal class BLEGattService : Service() {
             }
         }
         data class Disconnecting(val address: String) : State
-        object Disconnected : State
+        object Disconnected : State {
+            override fun toString(): String {
+                return "Disconnected"
+            }
+        }
     }
 
     sealed interface Event {
@@ -481,7 +483,7 @@ internal class BLEGattService : Service() {
                         }
                         else -> {
                             if (device.address == state.address) {
-                                TODO("State: $state. Type: ${state.type}. The service is not ready for pairing/unpairing device ${state.address}!")
+                                TODO("State: $state. Type: ${state.type}. Bond state changed: $oldState -> $newState. The service is not ready for pairing/unpairing device ${state.address}!")
                             }
                             Log.d(TAG, "State: $state. Type: ${state.type}. So I ignore device ${device.address}.")
                             return
@@ -736,11 +738,6 @@ internal class BLEGattService : Service() {
             address = state.address,
             isPaired = gatt.device.bondState == BluetoothDevice.BOND_BONDED,
             type = State.Connected.Type.READY,
-            services = gatt.services.associate { gs ->
-                gs.uuid to gs.characteristics.associate { gc ->
-                    gc.uuid to gc.descriptors.map { it.uuid }.toSet()
-                }
-            },
         )
         scope.launch {
             _profileBroadcast.emit(
@@ -753,18 +750,12 @@ internal class BLEGattService : Service() {
 
     private fun onServicesDiscovered(gatt: BluetoothGatt) {
         val state = state.value
-        if (state !is State.Connecting) TODO()
+        if (state !is State.Connecting) TODO("On services discovered state: $state")
         if (state.type != State.Connecting.Type.DISCOVER) TODO()
-        val service = this
         _state.value = State.Connected(
             address = state.address,
             isPaired = gatt.device.bondState == BluetoothDevice.BOND_BONDED,
             type = State.Connected.Type.READY,
-            services = gatt.services.associate { gs ->
-                gs.uuid to gs.characteristics.associate { gc ->
-                    gc.uuid to gc.descriptors.map { it.uuid }.toSet()
-                }
-            },
         )
     }
 
@@ -1616,6 +1607,13 @@ internal class BLEGattService : Service() {
         when (oldState) {
             is State.Connected -> {
                 if (newState !is State.Connected) {
+                    val message = """
+                        * $oldState
+                         \
+                          * $newState
+                        unregister receiver connected
+                    """.trimIndent()
+                    Log.d(TAG, message)
                     unregisterReceiver(receiversConnected)
                 }
             }
@@ -1625,6 +1623,13 @@ internal class BLEGattService : Service() {
                     it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
                     it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
                 }
+                val message = """
+                    * $oldState
+                     \
+                      * $newState
+                    register receivers
+                """.trimIndent()
+                Log.d(TAG, message)
                 registerReceiver(receivers, filter)
             }
             else -> {
@@ -1657,6 +1662,13 @@ internal class BLEGattService : Service() {
                         it.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
                         it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
                     }
+                    val message = """
+                        * $oldState
+                         \
+                          * $newState
+                        register receiver connected
+                    """.trimIndent()
+                    Log.d(TAG, message)
                     registerReceiver(receiversConnected, filter)
                 }
             }
@@ -1667,7 +1679,13 @@ internal class BLEGattService : Service() {
             State.Disconnected -> {
                 if (oldState is State.Disconnected) return
                 _event.emit(Event.OnDisconnected)
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                val message = """
+                    * $oldState
+                     \
+                      * $newState
+                    unregister receivers
+                """.trimIndent()
+                Log.d(TAG, message)
                 unregisterReceiver(receivers)
                 scanSettings = null
             }
