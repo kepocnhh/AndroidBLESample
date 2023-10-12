@@ -10,7 +10,6 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import test.android.ble.R
-import test.android.ble.module.bluetooth.BLEGattService
 import test.android.ble.util.android.startForeground
 import kotlin.math.absoluteValue
 
@@ -89,18 +88,6 @@ internal inline fun <reified T : Service> Context.notifyAndStartForeground(
     startForeground<T>(
         notificationId = ForegroundUtil.NOTIFICATION_ID,
         notification = notification,
-    )
-}
-
-internal fun Context.notifyAndStartForeground(
-    title: String,
-    action: BLEGattService.Action,
-    button: String,
-) {
-    notifyAndStartForeground<BLEGattService>(
-        intent = BLEGattService.intent(context = this, action = action),
-        title = title,
-        button = button,
     )
 }
 

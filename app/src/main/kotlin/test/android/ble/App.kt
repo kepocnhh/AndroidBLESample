@@ -59,9 +59,9 @@ internal class App : Application() {
     private fun onEvent(event: BLEGattService.Event) {
         when (event) {
             is BLEGattService.Event.OnConnected -> {
-                notifyAndStartForeground(
+                notifyAndStartForeground<BLEGattService>(
                     title = "connected ${event.address}",
-                    action = BLEGattService.Action.DISCONNECT,
+                    intent = BLEGattService.intent(context = this, action = BLEGattService.Action.DISCONNECT),
                     button = "disconnect",
                 )
             }
@@ -75,16 +75,16 @@ internal class App : Application() {
                 notifyAndStartForeground<BLEGattService>(title = "disconnecting ${event.address}...")
             }
             is BLEGattService.Event.OnSearchComing -> {
-                notifyAndStartForeground(
+                notifyAndStartForeground<BLEGattService>(
                     title = "searching ${event.address}...",
-                    action = BLEGattService.Action.SEARCH_STOP,
+                    intent = BLEGattService.intent(context = this, action = BLEGattService.Action.SEARCH_STOP),
                     button = "stop",
                 )
             }
             BLEGattService.Event.OnSearchWaiting -> {
-                notifyAndStartForeground(
+                notifyAndStartForeground<BLEGattService>(
                     title = "search waiting...",
-                    action = BLEGattService.Action.SEARCH_STOP,
+                    intent = BLEGattService.intent(context = this, action = BLEGattService.Action.SEARCH_STOP),
                     button = "stop",
                 )
             }
