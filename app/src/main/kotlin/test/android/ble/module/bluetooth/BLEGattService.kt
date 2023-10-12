@@ -1608,9 +1608,9 @@ internal class BLEGattService : Service() {
             is State.Connected -> {
                 if (newState !is State.Connected) {
                     val message = """
-                        * $oldState
-                         \
-                          * $newState
+                          * $oldState
+                         /
+                        * $newState
                         unregister receiver connected
                     """.trimIndent()
                     Log.d(TAG, message)
@@ -1680,9 +1680,9 @@ internal class BLEGattService : Service() {
                 if (oldState is State.Disconnected) return
                 _event.emit(Event.OnDisconnected)
                 val message = """
-                    * $oldState
-                     \
-                      * $newState
+                      * $oldState
+                     /
+                    * $newState
                     unregister receivers
                 """.trimIndent()
                 Log.d(TAG, message)
