@@ -483,7 +483,26 @@ internal class BLEGattService : Service() {
                         }
                         else -> {
                             if (device.address == state.address) {
-                                TODO("State: $state. Type: ${state.type}. Bond state changed: $oldState -> $newState. The service is not ready for pairing/unpairing device ${state.address}!")
+                                when (oldState) {
+                                    BluetoothDevice.BOND_BONDED -> {
+                                        when (newState) {
+                                            BluetoothDevice.BOND_NONE -> {
+                                                if (state.isPaired) {
+                                                    Log.d(TAG, "The device was unpaired externally.")
+                                                    _state.value = state.copy(type = State.Connected.Type.UNPAIRING)
+                                                    onUnpair(device)
+                                                }
+                                                return
+                                            }
+                                        }
+                                    }
+                                }
+                                val message = """
+                                    * State: $state.
+                                    * Bond state changed: $oldState -> $newState.
+                                    The service is not ready for pairing/unpairing device ${state.address}!
+                                """.trimIndent()
+                                error(message)
                             }
                             Log.d(TAG, "State: $state. Type: ${state.type}. So I ignore device ${device.address}.")
                             return
