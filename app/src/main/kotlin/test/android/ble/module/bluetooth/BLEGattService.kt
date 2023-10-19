@@ -495,6 +495,7 @@ internal class BLEGattService : Service() {
                                     }
                                 }
                                 BluetoothDevice.BOND_BONDED -> {
+                                    // todo check device is bonded
                                     if (state.type == State.Connected.Type.PAIRING) {
                                         onBonded(device) // todo
                                         return
@@ -511,6 +512,7 @@ internal class BLEGattService : Service() {
                         BluetoothDevice.BOND_BONDING -> {
                             when (newState) {
                                 BluetoothDevice.BOND_NONE -> {
+                                    // todo check device is unpaired
                                     when {
                                         state.type == State.Connected.Type.PAIRING -> {
                                             pin = null
@@ -543,6 +545,7 @@ internal class BLEGattService : Service() {
                                     return
                                 }
                                 BluetoothDevice.BOND_BONDED -> {
+                                    // todo check device is bonded
                                     if (state.type == State.Connected.Type.PAIRING) {
                                         onBonded(device) // todo
                                         return
@@ -559,6 +562,7 @@ internal class BLEGattService : Service() {
                         BluetoothDevice.BOND_BONDED -> {
                             when (newState) {
                                 BluetoothDevice.BOND_NONE -> {
+                                    // todo check device is unpaired
                                     if (state.type == State.Connected.Type.UNPAIRING) {
                                         onUnpair(device) // todo
                                         return
