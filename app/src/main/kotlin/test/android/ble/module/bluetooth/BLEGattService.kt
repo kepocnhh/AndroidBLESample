@@ -500,6 +500,12 @@ internal class BLEGattService : Service() {
                                             }
                                             return
                                         }
+                                        BluetoothDevice.BOND_BONDING -> {
+                                            if (state.isPaired) {
+                                                Log.d(TAG, "The device ${device.address} is unpairing externally.")
+                                            }
+                                            return
+                                        }
                                     }
                                 }
                                 BluetoothDevice.BOND_NONE -> {
