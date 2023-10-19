@@ -496,7 +496,7 @@ internal class BLEGattService : Service() {
                                 }
                                 BluetoothDevice.BOND_BONDED -> {
                                     if (state.type == State.Connected.Type.PAIRING) {
-                                        onBonded(device)
+                                        onBonded(device) // todo
                                         return
                                     }
                                     if (!state.isPaired) {
@@ -530,7 +530,7 @@ internal class BLEGattService : Service() {
                                             onBondingFailed(address = device.address, error)
                                         }
                                         state.type == State.Connected.Type.UNPAIRING -> {
-                                            onUnpair(device)
+                                            onUnpair(device) // todo
                                         }
                                         state.isPaired -> {
                                             Log.d(TAG, "The device ${device.address} was unpaired externally.")
@@ -544,7 +544,7 @@ internal class BLEGattService : Service() {
                                 }
                                 BluetoothDevice.BOND_BONDED -> {
                                     if (state.type == State.Connected.Type.PAIRING) {
-                                        onBonded(device)
+                                        onBonded(device) // todo
                                         return
                                     }
                                     if (!state.isPaired) {
@@ -560,7 +560,7 @@ internal class BLEGattService : Service() {
                             when (newState) {
                                 BluetoothDevice.BOND_NONE -> {
                                     if (state.type == State.Connected.Type.UNPAIRING) {
-                                        onUnpair(device)
+                                        onUnpair(device) // todo
                                         return
                                     }
                                     if (state.isPaired) {
@@ -670,6 +670,7 @@ internal class BLEGattService : Service() {
         }
     }
 
+    @Deprecated(message = "only used locally")
     private fun onUnpair(device: BluetoothDevice) {
         val state = state.value
         if (state !is State.Connected) TODO("State: $state!")
@@ -695,6 +696,7 @@ internal class BLEGattService : Service() {
         }
     }
 
+    @Deprecated(message = "only used locally")
     private fun onBonded(device: BluetoothDevice) {
         val state = state.value
         if (state !is State.Connected) TODO("State: $state!")
