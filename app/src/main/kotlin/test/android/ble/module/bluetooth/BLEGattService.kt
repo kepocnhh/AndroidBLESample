@@ -100,13 +100,6 @@ internal class BLEGattService : Service() {
                 UNPAIRING,
                 DISCOVER,
             }
-
-            fun inPairing(): Boolean {
-                return when (type) {
-                    Type.PAIRING, Type.UNPAIRING -> true
-                    else -> false
-                }
-            }
         }
         data class Disconnecting(val address: String) : State
         object Disconnected : State {
@@ -492,70 +485,99 @@ internal class BLEGattService : Service() {
                         BluetoothDevice.BOND_NONE -> {
                             when (newState) {
                                 BluetoothDevice.BOND_BONDING -> {
-                                    if (state.inPairing()) {
+                                    if (state.type == State.Connected.Type.PAIRING) {
                                         Log.d(TAG, "Pairing request to ${device.address}...")
-                                    } else {
-                                        Log.d(TAG, "Pairing request to ${device.address} externally.")
+                                        return
                                     }
-                                    return
+                                    if (!state.isPaired) {
+                                        Log.d(TAG, "Pairing request to ${device.address} externally.")
+                                        return
+                                    }
                                 }
-                                BluetoothDevice.BOND_BONDED -> TODO()
+                                BluetoothDevice.BOND_BONDED -> {
+                                    if (state.type == State.Connected.Type.PAIRING) {
+                                        onBonded(device)
+                                        return
+                                    }
+                                    if (!state.isPaired) {
+                                        Log.i(TAG, "The external pairing request to ${device.address} has been accepted.")
+                                        _state.value = state.copy(isPaired = true)
+                                        onPair(device = device)
+                                        return
+                                    }
+                                }
                             }
                         }
                         BluetoothDevice.BOND_BONDING -> {
                             when (newState) {
                                 BluetoothDevice.BOND_NONE -> {
-                                    if (state.inPairing()) {
-                                        pin = null
-                                        val reasonKey = "android.bluetooth.device.extra.REASON"
-                                        if (!intent.hasExtra(reasonKey)) {
-                                            Log.w(TAG, "No pairing with unknown reason!")
-                                            onBondingFailed(address = device.address, null)
-                                            return
+                                    when {
+                                        state.type == State.Connected.Type.PAIRING -> {
+                                            pin = null
+                                            val reasonKey = "android.bluetooth.device.extra.REASON"
+                                            if (!intent.hasExtra(reasonKey)) {
+                                                Log.w(TAG, "No pairing with unknown reason!")
+                                                onBondingFailed(address = device.address, null)
+                                                return
+                                            }
+                                            val reason = intent.getIntExtra(reasonKey, BluetoothDevice.ERROR)
+                                            val error = getPairErrorOrNull(reason = reason)
+                                            if (error == null) {
+                                                Log.w(TAG, "No pairing because unknown error! Code: $reason")
+                                            } else {
+                                                logPairError(error)
+                                            }
+                                            onBondingFailed(address = device.address, error)
                                         }
-                                        val reason = intent.getIntExtra(reasonKey, BluetoothDevice.ERROR)
-                                        val error = getPairErrorOrNull(reason = reason)
-                                        if (error == null) {
-                                            Log.w(TAG, "No pairing because unknown error! Code: $reason")
-                                        } else {
-                                            logPairError(error)
+                                        state.type == State.Connected.Type.UNPAIRING -> {
+                                            onUnpair(device)
                                         }
-                                        onBondingFailed(address = device.address, error)
-                                    } else {
-                                        Log.d(TAG, "The external pairing request to ${device.address} was rejected.")
+                                        state.isPaired -> {
+                                            Log.d(TAG, "The device ${device.address} was unpaired externally.")
+                                            _state.value = state.copy(isPaired = false)
+                                        }
+                                        else -> {
+                                            Log.d(TAG, "The device ${device.address} was not bonded.")
+                                        }
                                     }
                                     return
                                 }
                                 BluetoothDevice.BOND_BONDED -> {
-                                    if (state.inPairing()) {
+                                    if (state.type == State.Connected.Type.PAIRING) {
                                         onBonded(device)
-                                    } else if (!state.isPaired) {
-                                        Log.d(TAG, "The external pairing request to ${device.address} has been accepted.")
+                                        return
+                                    }
+                                    if (!state.isPaired) {
+                                        Log.i(TAG, "The external pairing request to ${device.address} has been accepted.")
                                         _state.value = state.copy(isPaired = true)
                                         onPair(device = device)
+                                        return
                                     }
-                                    return
                                 }
                             }
                         }
                         BluetoothDevice.BOND_BONDED -> {
                             when (newState) {
                                 BluetoothDevice.BOND_NONE -> {
-                                    if (state.inPairing()) {
+                                    if (state.type == State.Connected.Type.UNPAIRING) {
                                         onUnpair(device)
-                                    } else if (state.isPaired) {
+                                        return
+                                    }
+                                    if (state.isPaired) {
                                         Log.d(TAG, "The device ${device.address} was unpaired externally.")
                                         _state.value = state.copy(isPaired = false)
+                                        return
                                     }
-                                    return
                                 }
                                 BluetoothDevice.BOND_BONDING -> {
-                                    if (state.inPairing()) {
+                                    if (state.type == State.Connected.Type.UNPAIRING) {
                                         Log.d(TAG, "The device ${device.address} is unpairing...")
-                                    } else {
-                                        Log.d(TAG, "The device ${device.address} is unpairing externally.")
+                                        return
                                     }
-                                    return
+                                    if (state.isPaired) {
+                                        Log.d(TAG, "The device ${device.address} is unpairing externally.")
+                                        return
+                                    }
                                 }
                             }
                         }
@@ -654,7 +676,7 @@ internal class BLEGattService : Service() {
         if (state.type != State.Connected.Type.UNPAIRING) TODO("State type: ${state.type}!")
         if (!state.isPaired) TODO("Already unpaired!")
         if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
-        Log.d(TAG, "on unpair: ${device.address}")
+        Log.i(TAG, "The device ${device.address} is no longer paired.")
         _state.value = state.copy(type = State.Connected.Type.READY, isPaired = false)
     }
 
@@ -679,7 +701,7 @@ internal class BLEGattService : Service() {
         if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
         if (state.isPaired) TODO("Already paired!")
         if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
-        Log.d(TAG, "on bonded: ${device.address}")
+        Log.i(TAG, "The device ${device.address} is bonded.")
         _state.value = state.copy(type = State.Connected.Type.READY, isPaired = true)
         onPair(device = device)
     }
