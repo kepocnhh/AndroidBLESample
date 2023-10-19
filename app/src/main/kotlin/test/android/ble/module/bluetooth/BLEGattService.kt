@@ -488,11 +488,38 @@ internal class BLEGattService : Service() {
                                         when (newState) {
                                             BluetoothDevice.BOND_NONE -> {
                                                 if (state.isPaired) {
-                                                    Log.d(TAG, "The device was unpaired externally.")
-                                                    _state.value = state.copy(type = State.Connected.Type.UNPAIRING)
-                                                    onUnpair(device)
+                                                    Log.d(TAG, "The device ${device.address} was unpaired externally.")
+                                                    _state.value = state.copy(isPaired = false)
                                                 }
                                                 return
+                                            }
+                                        }
+                                    }
+                                    BluetoothDevice.BOND_NONE -> {
+                                        when (newState) {
+                                            BluetoothDevice.BOND_BONDING -> {
+                                                if (!state.isPaired) {
+                                                    Log.d(TAG, "Pairing request to ${device.address} externally.")
+                                                    return
+                                                }
+                                            }
+                                        }
+                                    }
+                                    BluetoothDevice.BOND_BONDING -> {
+                                        when (newState) {
+                                            BluetoothDevice.BOND_NONE -> {
+                                                if (!state.isPaired) {
+                                                    Log.d(TAG, "The external pairing request to ${device.address} was rejected.")
+                                                    return
+                                                }
+                                            }
+                                            BluetoothDevice.BOND_BONDED -> {
+                                                if (!state.isPaired) {
+                                                    Log.d(TAG, "The external pairing request to ${device.address} has been accepted.")
+                                                    _state.value = state.copy(isPaired = true)
+                                                    onPair(device = device)
+                                                    return
+                                                }
                                             }
                                         }
                                     }
@@ -629,14 +656,7 @@ internal class BLEGattService : Service() {
         _state.value = state.copy(type = State.Connected.Type.READY, isPaired = false)
     }
 
-    private fun onBonded(device: BluetoothDevice) {
-        val state = state.value
-        if (state !is State.Connected) TODO("State: $state!")
-        if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
-        if (state.isPaired) TODO("Already paired!")
-        if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
-        Log.d(TAG, "on bonded: ${device.address}")
-        _state.value = state.copy(type = State.Connected.Type.READY, isPaired = true)
+    private fun onPair(device: BluetoothDevice) {
         scope.launch {
             _broadcast.emit(
                 Broadcast.OnPair(
@@ -649,6 +669,17 @@ internal class BLEGattService : Service() {
                 ),
             )
         }
+    }
+
+    private fun onBonded(device: BluetoothDevice) {
+        val state = state.value
+        if (state !is State.Connected) TODO("State: $state!")
+        if (state.type != State.Connected.Type.PAIRING) TODO("State type: ${state.type}!")
+        if (state.isPaired) TODO("Already paired!")
+        if (device.address != state.address) TODO("Expected ${state.address}, actual ${device.address}!")
+        Log.d(TAG, "on bonded: ${device.address}")
+        _state.value = state.copy(type = State.Connected.Type.READY, isPaired = true)
+        onPair(device = device)
     }
 
     private fun onPINPairingRequest(address: String, pin: String) {
