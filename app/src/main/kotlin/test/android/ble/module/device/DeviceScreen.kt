@@ -824,7 +824,8 @@ internal fun DeviceScreen(
                                         PairException.Error.FAILED -> context.showToast("Pair failed!")
                                         PairException.Error.REJECTED -> context.showToast("Pair rejected!")
                                         PairException.Error.CANCELED -> context.showToast("Pair canceled!")
-                                        else -> context.showToast("Unknown pair error!")
+                                        PairException.Error.REMOVED -> context.showToast("Pair removed!")
+                                        null -> context.showToast("Unknown pair error!")
                                     }
                                 }
                                 else -> context.showToast("Unknown error!")

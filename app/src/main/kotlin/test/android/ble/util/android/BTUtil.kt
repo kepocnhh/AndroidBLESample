@@ -18,6 +18,7 @@ internal class PairException(val error: Error?) : Exception() {
         FAILED,
         REJECTED,
         CANCELED,
+        REMOVED,
     }
 }
 
