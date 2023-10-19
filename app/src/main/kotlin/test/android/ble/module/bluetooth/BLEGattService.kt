@@ -100,6 +100,13 @@ internal class BLEGattService : Service() {
                 UNPAIRING,
                 DISCOVER,
             }
+
+            fun inPairing(): Boolean {
+                return when (type) {
+                    Type.PAIRING, Type.UNPAIRING -> true
+                    else -> false
+                }
+            }
         }
         data class Disconnecting(val address: String) : State
         object Disconnected : State {
@@ -477,67 +484,60 @@ internal class BLEGattService : Service() {
                         ?: TODO("No device!")
                     val state = state.value
                     if (state !is State.Connected) TODO("This receiver should only operate in the connected state. But state is $state!")
-                    when (state.type) {
-                        State.Connected.Type.PAIRING, State.Connected.Type.UNPAIRING -> {
-                            // noop
+                    when {
+                        device.address != state.address -> {
+                            Log.d(TAG, "Expected device ${state.address}. So I ignore device ${device.address}.")
+                            return
                         }
-                        else -> {
-                            if (device.address == state.address) {
-                                when (oldState) {
-                                    BluetoothDevice.BOND_BONDED -> {
-                                        when (newState) {
-                                            BluetoothDevice.BOND_NONE -> {
-                                                if (state.isPaired) {
-                                                    Log.d(TAG, "The device ${device.address} was unpaired externally.")
-                                                    _state.value = state.copy(isPaired = false)
-                                                }
+                        !state.inPairing() -> {
+                            when (oldState) {
+                                BluetoothDevice.BOND_BONDED -> {
+                                    when (newState) {
+                                        BluetoothDevice.BOND_NONE -> {
+                                            if (state.isPaired) {
+                                                Log.d(TAG, "The device ${device.address} was unpaired externally.")
+                                                _state.value = state.copy(isPaired = false)
+                                            }
+                                            return
+                                        }
+                                    }
+                                }
+                                BluetoothDevice.BOND_NONE -> {
+                                    when (newState) {
+                                        BluetoothDevice.BOND_BONDING -> {
+                                            if (!state.isPaired) {
+                                                Log.d(TAG, "Pairing request to ${device.address} externally.")
                                                 return
                                             }
                                         }
                                     }
-                                    BluetoothDevice.BOND_NONE -> {
-                                        when (newState) {
-                                            BluetoothDevice.BOND_BONDING -> {
-                                                if (!state.isPaired) {
-                                                    Log.d(TAG, "Pairing request to ${device.address} externally.")
-                                                    return
-                                                }
+                                }
+                                BluetoothDevice.BOND_BONDING -> {
+                                    when (newState) {
+                                        BluetoothDevice.BOND_NONE -> {
+                                            if (!state.isPaired) {
+                                                Log.d(TAG, "The external pairing request to ${device.address} was rejected.")
+                                                return
                                             }
                                         }
-                                    }
-                                    BluetoothDevice.BOND_BONDING -> {
-                                        when (newState) {
-                                            BluetoothDevice.BOND_NONE -> {
-                                                if (!state.isPaired) {
-                                                    Log.d(TAG, "The external pairing request to ${device.address} was rejected.")
-                                                    return
-                                                }
-                                            }
-                                            BluetoothDevice.BOND_BONDED -> {
-                                                if (!state.isPaired) {
-                                                    Log.d(TAG, "The external pairing request to ${device.address} has been accepted.")
-                                                    _state.value = state.copy(isPaired = true)
-                                                    onPair(device = device)
-                                                    return
-                                                }
+                                        BluetoothDevice.BOND_BONDED -> {
+                                            if (!state.isPaired) {
+                                                Log.d(TAG, "The external pairing request to ${device.address} has been accepted.")
+                                                _state.value = state.copy(isPaired = true)
+                                                onPair(device = device)
+                                                return
                                             }
                                         }
                                     }
                                 }
-                                val message = """
+                            }
+                            val message = """
                                     * State: $state.
                                     * Bond state changed: $oldState -> $newState.
                                     The service is not ready for pairing/unpairing device ${state.address}!
                                 """.trimIndent()
-                                error(message)
-                            }
-                            Log.d(TAG, "State: $state. Type: ${state.type}. So I ignore device ${device.address}.")
-                            return
+                            error(message)
                         }
-                    }
-                    if (device.address != state.address) {
-                        Log.d(TAG, "Expected device ${state.address}. So I ignore device ${device.address}.")
-                        return
                     }
                     Log.d(TAG, "Bond state changed: $oldState -> $newState")
                     when (newState) {
