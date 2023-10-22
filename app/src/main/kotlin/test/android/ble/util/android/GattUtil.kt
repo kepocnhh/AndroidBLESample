@@ -10,6 +10,7 @@ internal class GattException(val type: Type): Exception() {
         DESCRIPTOR_WRITING_WAS_NOT_INITIATED,
         READING_WAS_NOT_INITIATED,
         DISCONNECTING_BY_TIMEOUT,
+        MTU_VALUE_WAS_NOT_REQUESTED,
     }
 
     override fun toString(): String {
@@ -83,6 +84,18 @@ internal object GattUtil {
         }
         if (!gatt.writeDescriptor(descriptor)) {
             throw GattException(GattException.Type.DESCRIPTOR_WRITING_WAS_NOT_INITIATED)
+        }
+    }
+
+    /**
+     * [BluetoothGatt.requestMtu](https://android.googlesource.com/platform/packages/modules/Bluetooth/+/refs/heads/android13-dev/framework/java/android/bluetooth/BluetoothGatt.java#1784)
+     */
+    fun requestMtu(
+        gatt: BluetoothGatt,
+        size: Int,
+    ) {
+        if (!gatt.requestMtu(size)) {
+            throw GattException(GattException.Type.MTU_VALUE_WAS_NOT_REQUESTED)
         }
     }
 }

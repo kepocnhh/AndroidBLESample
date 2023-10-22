@@ -51,6 +51,10 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
+/**
+ * [Bluetooth](https://android.googlesource.com/platform/packages/modules/Bluetooth/)
+ * [Sources](https://android.googlesource.com/platform/packages/modules/Bluetooth/+/refs/heads/android13-dev/framework/java/android/bluetooth)
+ */
 internal class BLEGattService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
@@ -157,6 +161,9 @@ internal class BLEGattService : Service() {
         }
     }
 
+    /**
+     * [BluetoothGattCallback](https://android.googlesource.com/platform/packages/modules/Bluetooth/+/refs/heads/android13-dev/framework/java/android/bluetooth/BluetoothGattCallback.java)
+     */
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             Log.d(TAG, "on connection state change $status $newState")
@@ -344,6 +351,20 @@ internal class BLEGattService : Service() {
                 }
             }
         }
+
+        override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
+            when (status) {
+                BluetoothGatt.GATT_SUCCESS -> {
+                    if (gatt == null) TODO("No gatt!")
+                    Log.i(TAG, "On MTU changed to $mtu success.")
+                    onMtuChanged(size = mtu)
+                }
+                else -> {
+                    Log.w(TAG, "On MTU changed status: $status!")
+                    // todo
+                }
+            }
+        }
     }
     private val receivers = object : BroadcastReceiver() {
         private fun onReceive(intent: Intent) {
@@ -495,8 +516,9 @@ internal class BLEGattService : Service() {
                                     }
                                 }
                                 BluetoothDevice.BOND_BONDED -> {
+                                    // todo check device is bonded
                                     if (state.type == State.Connected.Type.PAIRING) {
-                                        onBonded(device)
+                                        onBonded(device) // todo
                                         return
                                     }
                                     if (!state.isPaired) {
@@ -511,6 +533,7 @@ internal class BLEGattService : Service() {
                         BluetoothDevice.BOND_BONDING -> {
                             when (newState) {
                                 BluetoothDevice.BOND_NONE -> {
+                                    // todo check device is unpaired
                                     when {
                                         state.type == State.Connected.Type.PAIRING -> {
                                             pin = null
@@ -530,7 +553,7 @@ internal class BLEGattService : Service() {
                                             onBondingFailed(address = device.address, error)
                                         }
                                         state.type == State.Connected.Type.UNPAIRING -> {
-                                            onUnpair(device)
+                                            onUnpair(device) // todo
                                         }
                                         state.isPaired -> {
                                             Log.d(TAG, "The device ${device.address} was unpaired externally.")
@@ -543,8 +566,9 @@ internal class BLEGattService : Service() {
                                     return
                                 }
                                 BluetoothDevice.BOND_BONDED -> {
+                                    // todo check device is bonded
                                     if (state.type == State.Connected.Type.PAIRING) {
-                                        onBonded(device)
+                                        onBonded(device) // todo
                                         return
                                     }
                                     if (!state.isPaired) {
@@ -559,8 +583,9 @@ internal class BLEGattService : Service() {
                         BluetoothDevice.BOND_BONDED -> {
                             when (newState) {
                                 BluetoothDevice.BOND_NONE -> {
+                                    // todo check device is unpaired
                                     if (state.type == State.Connected.Type.UNPAIRING) {
-                                        onUnpair(device)
+                                        onUnpair(device) // todo
                                         return
                                     }
                                     if (state.isPaired) {
@@ -670,6 +695,7 @@ internal class BLEGattService : Service() {
         }
     }
 
+    @Deprecated(message = "only used locally")
     private fun onUnpair(device: BluetoothDevice) {
         val state = state.value
         if (state !is State.Connected) TODO("State: $state!")
@@ -695,6 +721,7 @@ internal class BLEGattService : Service() {
         }
     }
 
+    @Deprecated(message = "only used locally")
     private fun onBonded(device: BluetoothDevice) {
         val state = state.value
         if (state !is State.Connected) TODO("State: $state!")
@@ -786,6 +813,7 @@ internal class BLEGattService : Service() {
         }
     }
 
+    @Deprecated(message = "to operations")
     private fun onDescriptorWrite(descriptor: BluetoothGattDescriptor) {
         val state = state.value
         if (state !is State.Connected) TODO("On descriptor write state: $state")
@@ -799,6 +827,21 @@ internal class BLEGattService : Service() {
                     descriptor = descriptor.uuid,
                     bytes = descriptor.value,
                 ),
+            )
+        }
+    }
+
+    private fun onMtuChanged(size: Int) {
+        val state = state.value
+        if (state !is State.Connected) {
+            Log.d(TAG, "The changed results are no longer relevant. Disconnected.")
+            return
+        }
+        if (state.type != State.Connected.Type.OPERATING) TODO("On MTU changed state type: ${state.type}")
+        performOperations()
+        scope.launch {
+            _profileBroadcast.emit(
+                Profile.Broadcast.OnMtuChanged(size = size),
             )
         }
     }
@@ -1202,6 +1245,9 @@ internal class BLEGattService : Service() {
                     value = operation.value,
                 )
             }
+            is ProfileOperation.RequestMtu -> {
+                requestMtu(size = operation.size)
+            }
         }
     }
 
@@ -1388,6 +1434,43 @@ internal class BLEGattService : Service() {
         )
     }
 
+    private fun requestMtu(size: Int) {
+        val state = state.value
+        if (state !is State.Connected) TODO("request MTU state: $state")
+        if (state.type != State.Connected.Type.OPERATING) TODO("request MTU state type: ${state.type}")
+        Log.d(TAG, "request MTU $size...")
+        launchCatching(
+            block = {
+                withContext(Dispatchers.Default) {
+                    GattUtil.requestMtu(
+                        gatt = checkNotNull(gatt),
+                        size = size,
+                    )
+                }
+            },
+            onSuccess = {
+                // todo
+            },
+            onFailure = {
+                when (it) {
+                    is GattException -> {
+                        when (it.type) {
+                            GattException.Type.MTU_VALUE_WAS_NOT_REQUESTED -> {
+                                Log.w(TAG, "The new MTU value was not successfully requested!")
+                            }
+                            else -> {
+                                // noop
+                            }
+                        }
+                    }
+                    else -> {
+                        TODO("request MTU error: $it")
+                    }
+                }
+            },
+        )
+    }
+
     private fun onPair(pin: String?) {
         Log.d(TAG, "on pair...")
         val state = state.value
@@ -1546,6 +1629,16 @@ internal class BLEGattService : Service() {
         performOperations()
     }
 
+    private fun onRequestMTU(size: Int) {
+        Log.d(TAG, "on request MTU...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on request MTU state: $state")
+        val operation = ProfileOperation.RequestMtu(size = size)
+        profileOperations.add(operation)
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
+    }
+
     private fun onStartCommand(intent: Intent) {
         val intentAction = intent.action ?: TODO("No intent action!")
         if (intentAction.isEmpty()) TODO("Intent action is empty!")
@@ -1648,6 +1741,16 @@ internal class BLEGattService : Service() {
                 onPair(pin)
             }
             Action.UNPAIR -> onUnpair()
+            Action.REQUEST_MTU -> {
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be request. Already disconnected.")
+                    return
+                }
+                if (!intent.hasExtra("size")) TODO("No size!")
+                val size = intent.getIntExtra("size", -1)
+                onRequestMTU(size = size)
+            }
             else -> {
                 when (intentAction) {
                     ServiceUtil.ACTION_START_FOREGROUND -> {
@@ -1816,6 +1919,7 @@ internal class BLEGattService : Service() {
         READ_CHARACTERISTIC,
         WRITE_CHARACTERISTIC,
         WRITE_DESCRIPTOR,
+        REQUEST_MTU,
         PAIR,
         UNPAIR,
     }
@@ -1841,6 +1945,7 @@ internal class BLEGattService : Service() {
             val characteristic: UUID,
             val value: Boolean,
         ) : ProfileOperation
+        data class RequestMtu(val size: Int) : ProfileOperation
     }
 
     object Profile {
@@ -1874,6 +1979,7 @@ internal class BLEGattService : Service() {
                 val characteristic: UUID,
                 val value: Boolean,
             ) : Broadcast
+            data class OnMtuChanged(val size: Int) : Broadcast
         }
 
         val broadcast = _profileBroadcast.asSharedFlow()
@@ -1932,6 +2038,15 @@ internal class BLEGattService : Service() {
             intent.putExtra("characteristic", characteristic.toString())
             intent.putExtra("descriptor", descriptor.toString())
             intent.putExtra("bytes", bytes)
+            context.startService(intent)
+        }
+
+        fun requestMtu(
+            context: Context,
+            size: Int,
+        ) {
+            val intent = intent(context, Action.REQUEST_MTU)
+            intent.putExtra("size", size)
             context.startService(intent)
         }
     }
