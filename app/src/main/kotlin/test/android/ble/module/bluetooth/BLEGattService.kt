@@ -1629,6 +1629,16 @@ internal class BLEGattService : Service() {
         performOperations()
     }
 
+    private fun onRequestMTU(size: Int) {
+        Log.d(TAG, "on request MTU...")
+        val state = state.value
+        if (state !is State.Connected) TODO("on request MTU state: $state")
+        val operation = ProfileOperation.RequestMtu(size = size)
+        profileOperations.add(operation)
+        if (state.type != State.Connected.Type.READY) return
+        performOperations()
+    }
+
     private fun onStartCommand(intent: Intent) {
         val intentAction = intent.action ?: TODO("No intent action!")
         if (intentAction.isEmpty()) TODO("Intent action is empty!")
@@ -1731,6 +1741,16 @@ internal class BLEGattService : Service() {
                 onPair(pin)
             }
             Action.UNPAIR -> onUnpair()
+            Action.REQUEST_MTU -> {
+                val state = state.value
+                if (state !is State.Connected) {
+                    Log.d(TAG, "Nothing will be request. Already disconnected.")
+                    return
+                }
+                if (!intent.hasExtra("size")) TODO("No size!")
+                val size = intent.getIntExtra("size", -1)
+                onRequestMTU(size = size)
+            }
             else -> {
                 when (intentAction) {
                     ServiceUtil.ACTION_START_FOREGROUND -> {

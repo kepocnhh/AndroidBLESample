@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -32,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -864,6 +866,15 @@ internal fun DeviceScreen(
                     }
                 }
                 is BLEGattService.Profile.Broadcast.OnChangeCharacteristic -> {
+                    val message = """
+                        On change characteristic:
+                        * ${broadcast.service}
+                        └ * ${broadcast.characteristic}
+                        Size: ${broadcast.bytes.size}
+                        Value: ${broadcast.bytes.contentToString()}
+                        HEX: ${BigInteger(1, broadcast.bytes).toString(16)}
+                    """.trimIndent()
+                    Log.d(TAG, message)
                     lastOperationState.value = Operation.ChangeCharacteristic(
                         service = broadcast.service,
                         characteristic = broadcast.characteristic,
@@ -888,6 +899,77 @@ internal fun DeviceScreen(
             .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT)
             .setReportDelay(0L)
             .build()
+    }
+    val requestMTUState = remember { mutableStateOf(false) }
+    if (requestMTUState.value) {
+        Dialog(
+            onDismissRequest = {
+                requestMTUState.value = false
+            },
+        ) {
+            check(gattState is BLEGattService.State.Connected)
+            check(gattState.type == BLEGattService.State.Connected.Type.READY)
+            Column(
+                modifier = Modifier
+                    .background(Color.White)
+                    .padding(8.dp),
+            ) {
+                val valueMTUState = remember { mutableStateOf(TextFieldValue()) }
+                Box(
+                    modifier = Modifier
+                        .height(64.dp)
+                        .fillMaxWidth(),
+                ) {
+                    val textStyle = TextStyle(
+                        fontSize = 18.sp,
+                        textAlign = TextAlign.Center,
+                        color = Color.Black,
+                        letterSpacing = 4.sp,
+                    )
+                    BasicTextField(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .wrapContentHeight(),
+                        singleLine = true,
+                        maxLines = 1,
+                        value = valueMTUState.value,
+                        onValueChange = {
+                            if (it.text.length > 3) {
+                                valueMTUState.value = it.copy(text = it.text.substring(0, 3))
+                            } else {
+                                valueMTUState.value = it
+                            }
+                        },
+                        textStyle = textStyle,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    if (valueMTUState.value.text.isEmpty()) {
+                        BasicText(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .wrapContentHeight(),
+                            text = "000",
+                            style = textStyle.copy(color = Color.Gray),
+                        )
+                    }
+                }
+                val size = valueMTUState.value.text.toIntOrNull()
+                val enabled = size != null && size > 0
+                BasicText(
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .onClick(enabled = enabled) {
+                            requestMTUState.value = false
+                            BLEGattService.Profile.requestMtu(context, size = size!!)
+                        }
+                        .padding(8.dp),
+                    text = "Request MTU size",
+                    style = TextStyle(
+                        color = if (enabled) Color.Black else Color.Red,
+                    )
+                )
+            }
+        }
     }
     Column(
         modifier = Modifier
@@ -927,6 +1009,13 @@ internal fun DeviceScreen(
             when (gattState) {
                 is BLEGattService.State.Connected -> {
                     val isReady = gattState.type == BLEGattService.State.Connected.Type.READY
+                    Button(
+                        text = "request MTU",
+                        enabled = isReady && !requestMTUState.value,
+                        onClick = {
+                            requestMTUState.value = true
+                        },
+                    )
                     Button(
                         text = "characteristics",
                         enabled = isReady && writeCharacteristicsState.value == null,
