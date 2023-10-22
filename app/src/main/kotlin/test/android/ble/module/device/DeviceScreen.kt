@@ -788,23 +788,7 @@ internal fun DeviceScreen(
                             }
                         }
                         is GattException -> {
-                            when (broadcast.error.type) {
-                                GattException.Type.CHARACTERISTIC_WRITING_WAS_NOT_INITIATED -> {
-                                    context.showToast("Characteristic writing was not initiated!")
-                                }
-                                GattException.Type.DESCRIPTOR_WRITING_WAS_NOT_INITIATED -> {
-                                    context.showToast("Descriptor writing was not initiated!")
-                                }
-                                GattException.Type.READING_WAS_NOT_INITIATED -> {
-                                    context.showToast("Reading was not initiated!")
-                                }
-                                GattException.Type.DISCONNECTING_BY_TIMEOUT -> {
-                                    context.showToast("Disconnecting by timeout!")
-                                }
-                                GattException.Type.NOTIFICATION_STATUS_WAS_NOT_SUCCESSFULLY_SET -> {
-                                    context.showToast("Notification status was not successfully set!")
-                                }
-                            }
+                            context.showToast("GATT error: ${broadcast.error.type}!")
                         }
                         else -> {
                             Log.w(TAG, "GATT unknown error: ${broadcast.error}")
@@ -888,6 +872,9 @@ internal fun DeviceScreen(
                 }
                 is BLEGattService.Profile.Broadcast.OnSetCharacteristicNotification -> {
                     Log.d(TAG, "set ${broadcast.service}/${broadcast.characteristic} notification: ${broadcast.value}")
+                }
+                is BLEGattService.Profile.Broadcast.OnMtuChanged -> {
+                    Log.d(TAG, "The MTU value changed to ${broadcast.size}.")
                 }
             }
         }

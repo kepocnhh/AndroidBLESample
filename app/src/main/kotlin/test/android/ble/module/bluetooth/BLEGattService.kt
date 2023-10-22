@@ -51,6 +51,10 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
+/**
+ * [Bluetooth](https://android.googlesource.com/platform/packages/modules/Bluetooth/)
+ * [Sources](https://android.googlesource.com/platform/packages/modules/Bluetooth/+/refs/heads/android13-dev/framework/java/android/bluetooth)
+ */
 internal class BLEGattService : Service() {
     sealed interface Broadcast {
         class OnError(val error: Throwable) : Broadcast
@@ -157,6 +161,9 @@ internal class BLEGattService : Service() {
         }
     }
 
+    /**
+     * [BluetoothGattCallback](https://android.googlesource.com/platform/packages/modules/Bluetooth/+/refs/heads/android13-dev/framework/java/android/bluetooth/BluetoothGattCallback.java)
+     */
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             Log.d(TAG, "on connection state change $status $newState")
@@ -340,6 +347,20 @@ internal class BLEGattService : Service() {
                     } else {
                         Log.w(TAG, "On descriptor ${descriptor.characteristic.service.uuid}/${descriptor.characteristic.uuid}/${descriptor.uuid} write $status!")
                     }
+                    // todo
+                }
+            }
+        }
+
+        override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
+            when (status) {
+                BluetoothGatt.GATT_SUCCESS -> {
+                    if (gatt == null) TODO("No gatt!")
+                    Log.i(TAG, "On MTU changed to $mtu success.")
+                    onMtuChanged(size = mtu)
+                }
+                else -> {
+                    Log.w(TAG, "On MTU changed status: $status!")
                     // todo
                 }
             }
@@ -792,6 +813,7 @@ internal class BLEGattService : Service() {
         }
     }
 
+    @Deprecated(message = "to operations")
     private fun onDescriptorWrite(descriptor: BluetoothGattDescriptor) {
         val state = state.value
         if (state !is State.Connected) TODO("On descriptor write state: $state")
@@ -805,6 +827,21 @@ internal class BLEGattService : Service() {
                     descriptor = descriptor.uuid,
                     bytes = descriptor.value,
                 ),
+            )
+        }
+    }
+
+    private fun onMtuChanged(size: Int) {
+        val state = state.value
+        if (state !is State.Connected) {
+            Log.d(TAG, "The changed results are no longer relevant. Disconnected.")
+            return
+        }
+        if (state.type != State.Connected.Type.OPERATING) TODO("On MTU changed state type: ${state.type}")
+        performOperations()
+        scope.launch {
+            _profileBroadcast.emit(
+                Profile.Broadcast.OnMtuChanged(size = size),
             )
         }
     }
@@ -1208,6 +1245,9 @@ internal class BLEGattService : Service() {
                     value = operation.value,
                 )
             }
+            is ProfileOperation.RequestMtu -> {
+                requestMtu(size = operation.size)
+            }
         }
     }
 
@@ -1389,6 +1429,43 @@ internal class BLEGattService : Service() {
                     performOperations()
                 } else {
                     TODO("set $service/$characteristic notification error: $it")
+                }
+            },
+        )
+    }
+
+    private fun requestMtu(size: Int) {
+        val state = state.value
+        if (state !is State.Connected) TODO("request MTU state: $state")
+        if (state.type != State.Connected.Type.OPERATING) TODO("request MTU state type: ${state.type}")
+        Log.d(TAG, "request MTU $size...")
+        launchCatching(
+            block = {
+                withContext(Dispatchers.Default) {
+                    GattUtil.requestMtu(
+                        gatt = checkNotNull(gatt),
+                        size = size,
+                    )
+                }
+            },
+            onSuccess = {
+                // todo
+            },
+            onFailure = {
+                when (it) {
+                    is GattException -> {
+                        when (it.type) {
+                            GattException.Type.MTU_VALUE_WAS_NOT_REQUESTED -> {
+                                Log.w(TAG, "The new MTU value was not successfully requested!")
+                            }
+                            else -> {
+                                // noop
+                            }
+                        }
+                    }
+                    else -> {
+                        TODO("request MTU error: $it")
+                    }
                 }
             },
         )
@@ -1822,6 +1899,7 @@ internal class BLEGattService : Service() {
         READ_CHARACTERISTIC,
         WRITE_CHARACTERISTIC,
         WRITE_DESCRIPTOR,
+        REQUEST_MTU,
         PAIR,
         UNPAIR,
     }
@@ -1847,6 +1925,7 @@ internal class BLEGattService : Service() {
             val characteristic: UUID,
             val value: Boolean,
         ) : ProfileOperation
+        data class RequestMtu(val size: Int) : ProfileOperation
     }
 
     object Profile {
@@ -1880,6 +1959,7 @@ internal class BLEGattService : Service() {
                 val characteristic: UUID,
                 val value: Boolean,
             ) : Broadcast
+            data class OnMtuChanged(val size: Int) : Broadcast
         }
 
         val broadcast = _profileBroadcast.asSharedFlow()
@@ -1938,6 +2018,15 @@ internal class BLEGattService : Service() {
             intent.putExtra("characteristic", characteristic.toString())
             intent.putExtra("descriptor", descriptor.toString())
             intent.putExtra("bytes", bytes)
+            context.startService(intent)
+        }
+
+        fun requestMtu(
+            context: Context,
+            size: Int,
+        ) {
+            val intent = intent(context, Action.REQUEST_MTU)
+            intent.putExtra("size", size)
             context.startService(intent)
         }
     }
